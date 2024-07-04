@@ -1,0 +1,16 @@
+[Unit]
+Description=Docker Firewall Service
+After=docker.service
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/local/bin/docker-firewall.sh
+Restart=always
+User=root
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=docker-firewall
+Environment=LOG_LEVEL=INFO
+
+[Install]
+WantedBy=multi-user.target
