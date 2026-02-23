@@ -1,26 +1,29 @@
 #!/bin/bash
-set -o nounset
+set -euo pipefail
 
-LOG_LEVEL="" # DEBUG to print debug logs
+readonly LOG_LEVEL="DEBUG" # DEBUG to print debug logs
+readonly DRY_RUN="1"
 
 _log() {
     if [[ "$#" -eq 1 ]]; then
-        level="INFO"
-        message="$1"
+        local level="INFO"
+        local message="$1"
     else
-        level="$1"
-        message="$2"
+        local level="$1"
+        local message="$2"
     fi
 
     if [[ -n "${INVOCATION_ID:-}" ]]; then
-        date=""
+        local date=""
     else
-        date="$(date -Iseconds)"
+        local date="$(date -Iseconds)"
     fi
 
-    if [[ "$level" != "DEBUG" ]] || [[ "$LOG_LEVEL" = "DEBUG" ]]; then
-        printf "%s %8s %s\n" "$date" "$level" "$message"
+    if [[ "$level" == "DEBUG" ]] && [[ "$LOG_LEVEL" != "DEBUG" ]]; then
+        return
     fi
+
+    printf "%s %8s %s\n" "$date" "$level" "$message"
 }
 
 
@@ -28,41 +31,58 @@ _log() {
 apply_iptables_rules() {
     local CONTAINER_ID="$1"
 
-    LABELS=$(docker inspect --format '{{json .Config.Labels}}' "$CONTAINER_ID")
+    local LABELS=$(docker inspect --format '{{json .Config.Labels}}' "$CONTAINER_ID")
     if [[ -z "$LABELS" ]]; then
         _log "ERROR" "Failed to get labels for container $CONTAINER_ID"
         return 1
     fi
 
-    PID=$(docker inspect --format '{{.State.Pid}}' "$CONTAINER_ID")
+    local PID=$(docker inspect --format '{{.State.Pid}}' "$CONTAINER_ID")
     if [[ -z "$PID" ]]; then
         _log "ERROR" "Failed to get PID for container $CONTAINER_ID"
         return 1
     fi
 
-    RULES=$(echo "$LABELS" | jq -r 'to_entries | map(select(.key | startswith("firewall.rules."))) | map({(.key): .value}) | add')
+    local RULES=$(echo "$LABELS" | jq -r | grep -P '^  "firewall\.rules\.')
     if [[ -z "$RULES" ]]; then
         _log "INFO" "No firewall rules found for container $CONTAINER_ID"
         return 1
     fi
 
-    RULE_IDS=$(echo "$RULES" | jq -r '. | keys_unsorted[] | split(".") | .[2]' | sort -u | egrep '^[[:alnum:]]*$')
+    local RULE_IDS=$(echo "$RULES" | cut -d '.' -f 3 | sort -u | egrep '^[[:alnum:]]*$')
     if [[ -z "$RULE_IDS" ]]; then
         _log "INFO" "No firewall rule ids found for container $CONTAINER_ID"
         return 1
     fi
 
+    _log "Rules to process: $(echo $RULE_IDS | wc -w)"
+
     for RULE_ID in $RULE_IDS; do
         _log "DEBUG" "Rule ID=$RULE_ID"
 
-        CHAIN=$(echo "$RULES" | jq -r --arg RULE_ID "$RULE_ID" '. | keys[] | select(startswith("firewall.rules.\($RULE_ID).")) | split(".")[3]' | head -n 1)
+        local RULE=$(echo "$RULES" | grep -P "firewall\.rules\.${RULE_ID}\.")
+
+        local CHAIN_COUNT=$(echo "$RULE" | cut -d '.' -f 4 | sort -u | wc -l)
+
+        _log "DEBUG" "Rule $RULE_ID CHAIN_COUNT=$CHAIN_COUNT"
+
+        if [[ "$CHAIN_COUNT" -ne 1 ]]; then
+            _log "WARNING" "Rule $RULE_ID chain count ($CHAIN_COUNT) is invalid, ignoring rule"
+            continue
+        fi
+
+        local CHAIN=$(echo "$RULE" | head -n1 | cut -d '.' -f 4)
+
+        _log "DEBUG" "Rule $RULE_ID CHAIN=$CHAIN"
 
         if [[ ! "$CHAIN" =~ ^INPUT|OUTPUT|FORWARD$ ]]; then
-        	_log "WARNING" "Rule $RULE_ID CHAIN=$CHAIN is invalid"
+        	_log "WARNING" "Rule $RULE_ID CHAIN=$CHAIN is invalid, ignoring rule"
         	continue
     	fi
 
-        ACTION=$(echo "$RULES" | jq -r --arg RULE_ID "$RULE_ID" --arg CHAIN "$CHAIN" 'to_entries | map(select(.key | startswith("firewall.rules.\($RULE_ID).\($CHAIN).action"))) | from_entries[] // "ACCEPT"')
+        local ACTION=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.action" | cut -d '"' -f 4)
+
+        _log "DEBUG" "Rule $RULE_ID ACTION=$ACTION"
 
         if [[ ! "$ACTION" =~ ^ACCEPT|REJECT|DROP|LOG$ ]]; then
         	_log "WARNING" "Rule $RULE_ID ACTION=$ACTION is invalid"
@@ -70,10 +90,12 @@ apply_iptables_rules() {
     	fi
 
         # start building command
-        cmd="iptables -A $CHAIN -j $ACTION"
+        local cmd="iptables -A $CHAIN -j $ACTION"
 
     	if [[ "$ACTION" = "REJECT" ]]; then
-            REJECT_WITH=$(echo "$RULES" | jq -r --arg RULE_ID "$RULE_ID" --arg CHAIN "$CHAIN" 'to_entries | map(select(.key | startswith("firewall.rules.\($RULE_ID).\($CHAIN).reject_with"))) | from_entries[] // "icmp-admin-prohibited"')
+            local REJECT_WITH=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.reject_with" | cut -d '"' -f 4)
+
+            _log "DEBUG" "Rule $RULE_ID REJECT_WITH=$REJECT_WITH"
 
     	    if [[ ! "$REJECT_WITH" =~ ^icmp-net-unreachable|icmp-host-unreachable|icmp-port-unreachable|icmp-proto-unreachable|icmp-net-prohibited|icmp-host-prohib‐ited|icmp-admin-prohibited$ ]]; then
     	        _log "WARNING" "Rule $RULE_ID REJECT_WITH=$REJECT_WITH is invalid"
@@ -83,21 +105,35 @@ apply_iptables_rules() {
     	    cmd="$cmd --reject-with $REJECT_WITH"
     	fi
 
-        PROTOCOL=$(echo "$RULES" | jq -r --arg RULE_ID "$RULE_ID" --arg CHAIN "$CHAIN" 'to_entries | map(select(.key | startswith("firewall.rules.\($RULE_ID).\($CHAIN).protocol"))) | from_entries[] // "all"')
+        local PROTOCOL=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.protocol" | cut -d '"' -f 4)
+
+        _log "DEBUG" "Rule $RULE_ID PROTOCOL=$PROTOCOL"
 
         if [[ ! "$PROTOCOL" =~ ^all|tcp|udp|icmp|ip$ ]]; then
         	_log "WARNING" "Rule $RULE_ID PROTOCOL=$PROTOCOL is invalid"
         	continue
     	fi
 
-        SRC=$(echo "$RULES" | jq -r --arg RULE_ID "$RULE_ID" --arg CHAIN "$CHAIN" 'to_entries | map(select(.key | startswith("firewall.rules.\($RULE_ID).\($CHAIN).src"))) | from_entries[] // "0.0.0.0/0"')
+        local SRC=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.src" | cut -d '"' -f 4)
+
+        if [[ -z "$SRC" ]]; then
+            SRC="0.0.0.0/0"
+        fi
+
+        _log "DEBUG" "Rule $RULE_ID SRC=$SRC"
 
         if [[ ! "$SRC" =~ ^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\/([0-9]|[1-2][0-9]|3[0-2]))?$ ]]; then
         	_log "WARNING" "Rule $RULE_ID SRC=$SRC is invalid"
         	continue
         fi
 
-        DST=$(echo "$RULES" | jq -r --arg RULE_ID "$RULE_ID" --arg CHAIN "$CHAIN" 'to_entries | map(select(.key | startswith("firewall.rules.\($RULE_ID).\($CHAIN).dst"))) | from_entries[] // "0.0.0.0/0"')
+        local DST=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.dst" | cut -d '"' -f 4)
+
+        if [[ -z "$DST" ]]; then
+            DST="0.0.0.0/0"
+        fi
+
+        _log "DEBUG" "Rule $RULE_ID DST=$DST"
 
         if [[ ! "$DST" =~ ^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\/([0-9]|[1-2][0-9]|3[0-2]))?$ ]]; then
         	_log "WARNING" "Rule $RULE_ID DST=$DST is invalid"
@@ -106,52 +142,74 @@ apply_iptables_rules() {
 
         cmd="$cmd -p $PROTOCOL -s $SRC -d $DST"
 
-        SPORT="N/A"
-        DPORT="N/A"
+        _log "DEBUG" "cmd=$cmd"
+
+        local SPORT="N/A"
+        local DPORT="N/A"
 
         if [[ "$PROTOCOL" =~ ^tcp|udp$ ]]; then
-            SPORT=$(echo "$RULES" | jq -r --arg RULE_ID "$RULE_ID" --arg CHAIN "$CHAIN" 'to_entries | map(select(.key | startswith("firewall.rules.\($RULE_ID).\($CHAIN).sport"))) | from_entries[] // "0"')
+            _log "DEBUG" "looking for port numbers"
+
+            local SPORT=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.sport" | cut -d '"' -f 4)
+
+            _log "DEBUG" "Rule $RULE_ID SPORT=$SPORT"
+
             if [[ "$SPORT" =~ ^[0-9]+$ ]] && [[ "$SPORT" -gt "0" ]]; then
                 cmd="$cmd --sport $SPORT"
             fi
 
-            DPORT=$(echo "$RULES" | jq -r --arg RULE_ID "$RULE_ID" --arg CHAIN "$CHAIN" 'to_entries | map(select(.key | startswith("firewall.rules.\($RULE_ID).\($CHAIN).dport"))) | from_entries[] // "0"')
+            local DPORT=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.dport" | cut -d '"' -f 4)
+
+            _log "DEBUG" "Rule $RULE_ID DPORT=$DPORT"
+
             if [[ "$DPORT" =~ ^[0-9]+$ ]] && [[ "$DPORT" -gt "0" ]]; then
                 cmd="$cmd --dport $DPORT"
             fi
+
+            _log "DEBUG" "cmd=$cmd"
         fi
 
         _log "DEBUG" "Container=${CONTAINER_ID:0:8} PID=$PID RULE_ID=$RULE_ID is valid, applying CHAIN=$CHAIN ACTION=$ACTION PROTOCOL=$PROTOCOL SRC=$SRC DST=$DST SPORT=$SPORT DPORT=$DPORT"
         _log "DEBUG" "cmd=$cmd"
 
-        nsenter -n -t "$PID" -- $cmd
-        retcode="$?"
-
-        if [[ "$retcode" -eq "0" ]]; then
-            _log "Container=${CONTAINER_ID:0:8} PID=$PID RULE_ID=$RULE_ID applied successfully cmd=$cmd"
-        else
-            _log "WARNING" "Container=${CONTAINER_ID:0:8} PID=$PID RULE_ID=$RULE_ID failed with retcode=$retcode"
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            _log "DRY RUN MODE - Container=${CONTAINER_ID:0:8} would run: nsenter -n -t $PID $cmd"
+            continue
         fi
+
+        if ! nsenter -n -t "$PID" $cmd; then
+            _log "WARNING" "Container=${CONTAINER_ID:0:8} PID=$PID RULE_ID=$RULE_ID failed"
+            continue
+        fi
+
+        _log "Container=${CONTAINER_ID:0:8} PID=$PID RULE_ID=$RULE_ID applied successfully cmd=$cmd"
     done
 }
 
-if ! command -v jq &> /dev/null
-then
+if [[ "$(id -u)" -ne 0 ]]; then
+    _log "ERROR" "This script must be run as root."
+    exit 1
+fi
+
+if ! command -v jq &> /dev/null; then
     echo "Error: jq is not installed."
     exit 1
 fi
 
-if ! command -v nsenter &> /dev/null
-then
+if ! command -v nsenter &> /dev/null; then
     echo "Error: nsenter is not installed."
     exit 1
 fi
 
+_log "docker-firewall started, listening for events"
+
+_log "DEBUG" "debug log enabled"
+
 # Listen to Docker events
 docker events --filter type=container --filter event=start --filter label=firewall.enable=true | while read event; do
-    CONTAINER_ID=$(echo $event | awk '{print $4}')
-    CONTAINER_NAME=$(echo $event | sed -e 's/^.*, name=\(\S*\)).*$/\1/')
+    CONTAINER_ID=$(echo "$event" | awk '{print $4}')
+    CONTAINER_NAME=$(echo "$event" | sed -e 's/^.*, name=\(\S*\)).*$/\1/')
     _log "Container started name=$CONTAINER_NAME id=${CONTAINER_ID:0:8}"
-    apply_iptables_rules $CONTAINER_ID
+    apply_iptables_rules "$CONTAINER_ID"
     _log "Container rules processed"
 done
