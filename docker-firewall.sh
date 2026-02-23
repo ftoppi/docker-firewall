@@ -1,8 +1,16 @@
 #!/bin/bash
 set -euo pipefail
 
-readonly LOG_LEVEL="DEBUG" # DEBUG to print debug logs
-readonly DRY_RUN="1"
+# Design choices:
+# - The script does not remove rules when a container is stopped. Instead, it relies the namespace being deleted, and its associated rules with it.
+# - The script does not support rules applied at the network level. This is intended to not have to cleanup rules on network destruction.
+# - The script is written in Bash, which should tell you it is not meant for performance. It is not meant for busy systems where containers start all the time.
+# - The script only supports IPv4.
+# - The script relies on jq for JSON parsing.
+
+readonly LOG_LEVEL="${LOG_LEVEL:-INFO}" # set to DEBUG to print debug logs
+readonly DRY_RUN="${DRY_RUN:-0}"
+
 
 _log() {
     if [[ "$#" -eq 1 ]]; then
