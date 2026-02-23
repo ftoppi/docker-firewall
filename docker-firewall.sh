@@ -68,6 +68,17 @@ get_container_rules() {
 }
 
 
+get_container_rule_ids() {
+    local RULE_IDS=$(echo "$1" | cut -d '.' -f 3 | sort -u | egrep '^[[:alnum:]]*$')
+
+    if [[ -z "$RULE_IDS" ]]; then
+        return 1
+    fi
+
+    echo "$RULE_IDS"
+}
+
+
 apply_iptables_rules() {
     local CONTAINER_ID="$1"
 
@@ -86,8 +97,7 @@ apply_iptables_rules() {
         return 1
     fi
 
-    local RULE_IDS=$(echo "$RULES" | cut -d '.' -f 3 | sort -u | egrep '^[[:alnum:]]*$')
-    if [[ -z "$RULE_IDS" ]]; then
+    if ! local RULE_IDS=$(get_container_rule_ids "$RULES"); then
         _log "INFO" "No firewall rule ids found for container $CONTAINER_ID"
         return 1
     fi
