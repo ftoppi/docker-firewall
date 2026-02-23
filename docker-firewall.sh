@@ -34,20 +34,28 @@ _log() {
     printf "%s %8s %s\n" "$date" "$level" "$message"
 }
 
+get_container_pid() {
+    local PID=$(docker inspect --format '{{.State.Pid}}' "$1")
 
-# Function to parse the labels and apply iptables rules
+    if [[ -z "$PID" ]]; then
+        _log "ERROR" "Failed to get PID for container $1"
+        return 1
+    fi
+
+    echo "$PID"
+}
+
 apply_iptables_rules() {
     local CONTAINER_ID="$1"
+
+    if ! local PID=$(get_container_pid "$CONTAINER_ID"); then
+        _log "ERROR" "Failed to get PID for container $CONTAINER_ID"
+        return 1
+    fi
 
     local LABELS=$(docker inspect --format '{{json .Config.Labels}}' "$CONTAINER_ID")
     if [[ -z "$LABELS" ]]; then
         _log "ERROR" "Failed to get labels for container $CONTAINER_ID"
-        return 1
-    fi
-
-    local PID=$(docker inspect --format '{{.State.Pid}}' "$CONTAINER_ID")
-    if [[ -z "$PID" ]]; then
-        _log "ERROR" "Failed to get PID for container $CONTAINER_ID"
         return 1
     fi
 
