@@ -79,6 +79,47 @@ get_container_rule_ids() {
 }
 
 
+validate_rule_chain_count() {
+    local CHAIN_COUNT=$(echo "$1" | cut -d '.' -f 4 | sort -u | wc -l)
+
+    if [[ "$CHAIN_COUNT" -ne 1 ]]; then
+        _log "WARNING" "Rule chain count ($CHAIN_COUNT) is invalid, ignoring rule"
+        return 1
+    fi
+}
+
+
+get_rule_chain() {
+    validate_rule_chain_count "$1" || return 1
+
+    local CHAIN=$(echo "$1" | head -n1 | cut -d '.' -f 4)
+
+    if [[ ! "$CHAIN" =~ ^INPUT|OUTPUT|FORWARD$ ]]; then
+        _log "WARNING" "Rule CHAIN=$CHAIN is invalid, ignoring rule"
+        return 1
+    fi
+
+    echo "$CHAIN"
+}
+
+
+get_rule_action() {
+    local ACTION=$(echo "$1" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.action" | cut -d '"' -f 4)
+
+    if [[ ! "$ACTION" =~ ^ACCEPT|REJECT|DROP|LOG$ ]]; then
+        _log "WARNING" "Rule ACTION=$ACTION is invalid, ignoring rule"
+        return 1
+    fi
+
+    echo "$ACTION"
+}
+
+
+validate_rule() {
+    return 0
+}
+
+
 apply_iptables_rules() {
     local CONTAINER_ID="$1"
 
@@ -109,29 +150,19 @@ apply_iptables_rules() {
 
         local RULE=$(echo "$RULES" | grep -P "firewall\.rules\.${RULE_ID}\.")
 
-        local CHAIN_COUNT=$(echo "$RULE" | cut -d '.' -f 4 | sort -u | wc -l)
-
-        _log "DEBUG" "Rule $RULE_ID CHAIN_COUNT=$CHAIN_COUNT"
-
-        if [[ "$CHAIN_COUNT" -ne 1 ]]; then
-            _log "WARNING" "Rule $RULE_ID chain count ($CHAIN_COUNT) is invalid, ignoring rule"
+        if ! validate_rule "$RULE"; then
+            _log "WARNING" "Rule is invalid, ignoring rule"
             continue
         fi
 
-        local CHAIN=$(echo "$RULE" | head -n1 | cut -d '.' -f 4)
+        _log "DEBUG" "Rule is valid!"
 
-        _log "DEBUG" "Rule $RULE_ID CHAIN=$CHAIN"
-
-        if [[ ! "$CHAIN" =~ ^INPUT|OUTPUT|FORWARD$ ]]; then
+        if ! local CHAIN=$(get_rule_chain "$RULE"); then
         	_log "WARNING" "Rule $RULE_ID CHAIN=$CHAIN is invalid, ignoring rule"
         	continue
     	fi
 
-        local ACTION=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.action" | cut -d '"' -f 4)
-
-        _log "DEBUG" "Rule $RULE_ID ACTION=$ACTION"
-
-        if [[ ! "$ACTION" =~ ^ACCEPT|REJECT|DROP|LOG$ ]]; then
+        if ! local ACTION=$(get_rule_action "$RULE"); then
         	_log "WARNING" "Rule $RULE_ID ACTION=$ACTION is invalid"
         	continue
     	fi
