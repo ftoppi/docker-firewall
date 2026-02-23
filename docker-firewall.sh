@@ -39,7 +39,6 @@ get_container_pid() {
     local PID=$(docker inspect --format '{{.State.Pid}}' "$1")
 
     if [[ -z "$PID" ]]; then
-        _log "ERROR" "Failed to get PID for container $1"
         return 1
     fi
 
@@ -51,11 +50,21 @@ get_container_labels() {
     local LABELS=$(docker inspect --format '{{json .Config.Labels}}' "$1")
 
     if [[ -z "$LABELS" ]]; then
-        _log "ERROR" "Failed to get labels for container $1"
         return 1
     fi
 
     echo "$LABELS"
+}
+
+
+get_container_rules() {
+    local RULES=$(echo "$1" | jq -r | grep -P '^  "firewall\.rules\.')
+
+    if [[ -z "$RULES" ]]; then
+        return 1
+    fi
+
+    echo "$RULES"
 }
 
 
@@ -72,8 +81,7 @@ apply_iptables_rules() {
         return 1
     fi
 
-    local RULES=$(echo "$LABELS" | jq -r | grep -P '^  "firewall\.rules\.')
-    if [[ -z "$RULES" ]]; then
+    if ! local RULES=$(get_container_rules "$LABELS"); then
         _log "INFO" "No firewall rules found for container $CONTAINER_ID"
         return 1
     fi
