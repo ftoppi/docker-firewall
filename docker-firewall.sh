@@ -21,10 +21,12 @@ _log() {
         local message="$2"
     fi
 
+    local date
+
     if [[ -n "${INVOCATION_ID:-}" ]]; then
-        local date=""
+        date=""
     else
-        local date="$(date -Iseconds)"
+        date="$(date -Iseconds)"
     fi
 
     if [[ "$level" == "DEBUG" ]] && [[ "$LOG_LEVEL" != "DEBUG" ]]; then
@@ -36,7 +38,9 @@ _log() {
 
 
 get_container_pid() {
-    local PID=$(docker inspect --format '{{.State.Pid}}' "$1")
+    local PID
+
+    PID=$(docker inspect --format '{{.State.Pid}}' "$1")
 
     if [[ -z "$PID" ]]; then
         return 1
@@ -47,7 +51,9 @@ get_container_pid() {
 
 
 get_container_labels() {
-    local LABELS=$(docker inspect --format '{{json .Config.Labels}}' "$1")
+    local LABELS
+
+    LABELS=$(docker inspect --format '{{json .Config.Labels}}' "$1")
 
     if [[ -z "$LABELS" ]]; then
         return 1
@@ -58,7 +64,9 @@ get_container_labels() {
 
 
 get_container_rules() {
-    local RULES=$(echo "$1" | jq -r | grep -P '^  "firewall\.rules\.')
+    local RULES
+
+    RULES=$(echo "$1" | jq -r | grep -P '^  "firewall\.rules\.')
 
     if [[ -z "$RULES" ]]; then
         return 1
@@ -69,7 +77,9 @@ get_container_rules() {
 
 
 get_container_rule_ids() {
-    local RULE_IDS=$(echo "$1" | cut -d '.' -f 3 | sort -u | egrep '^[[:alnum:]]*$')
+    local RULE_IDS
+
+    RULE_IDS=$(echo "$1" | cut -d '.' -f 3 | sort -u | grep -P '^[[:alnum:]]*$')
 
     if [[ -z "$RULE_IDS" ]]; then
         return 1
@@ -80,7 +90,9 @@ get_container_rule_ids() {
 
 
 validate_rule_chain_count() {
-    local CHAIN_COUNT=$(echo "$1" | cut -d '.' -f 4 | sort -u | wc -l)
+    local CHAIN_COUNT
+
+    CHAIN_COUNT=$(echo "$1" | cut -d '.' -f 4 | sort -u | wc -l)
 
     if [[ "$CHAIN_COUNT" -ne 1 ]]; then
         _log "WARNING" "Rule chain count ($CHAIN_COUNT) is invalid, ignoring rule"
@@ -92,7 +104,9 @@ validate_rule_chain_count() {
 get_rule_chain() {
     validate_rule_chain_count "$1" || return 1
 
-    local CHAIN=$(echo "$1" | head -n1 | cut -d '.' -f 4)
+    local CHAIN
+
+    CHAIN=$(echo "$1" | head -n1 | cut -d '.' -f 4)
 
     if [[ ! "$CHAIN" =~ ^INPUT|OUTPUT|FORWARD$ ]]; then
         _log "WARNING" "Rule CHAIN=$CHAIN is invalid, ignoring rule"
@@ -104,7 +118,9 @@ get_rule_chain() {
 
 
 get_rule_action() {
-    local ACTION=$(echo "$1" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.action" | cut -d '"' -f 4)
+    local ACTION
+
+    ACTION=$(echo "$1" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.action" | cut -d '"' -f 4)
 
     if [[ ! "$ACTION" =~ ^ACCEPT|REJECT|DROP|LOG$ ]]; then
         _log "WARNING" "Rule ACTION=$ACTION is invalid, ignoring rule"
@@ -115,63 +131,83 @@ get_rule_action() {
 }
 
 
-validate_rule() {
-    return 0
+get_rule() {
+    local RULES="$1"
+    local RULE_ID="$2"
+
+    local RULE
+    RULE=$(echo "$RULES" | grep -P "firewall\.rules\.${RULE_ID}\.")
+
+    if [[ -z "$RULE" ]]; then
+        _log "WARNING" "Rule with ID=$RULE_ID is invalid, ignoring rule"
+        return 1
+    fi
+
+    echo "$RULE"
 }
 
 
 apply_iptables_rules() {
     local CONTAINER_ID="$1"
+    local PID
+    local LABELS
+    local RULES
+    local RULE_IDS
+    local RULE
+    local CHAIN
+    local ACTION
+    local REJECT_WITH
+    local PROTOCOL
+    local SRC
+    local DST
+    local SPORT
+    local DPORT
+    local cmd
 
-    if ! local PID=$(get_container_pid "$CONTAINER_ID"); then
+    if ! PID=$(get_container_pid "$CONTAINER_ID"); then
         _log "ERROR" "Failed to get PID for container $CONTAINER_ID"
         return 1
     fi
 
-    if ! local LABELS=$(get_container_labels "$CONTAINER_ID"); then
+    if ! LABELS=$(get_container_labels "$CONTAINER_ID"); then
         _log "ERROR" "Failed to get labels for container $CONTAINER_ID"
         return 1
     fi
 
-    if ! local RULES=$(get_container_rules "$LABELS"); then
+    if ! RULES=$(get_container_rules "$LABELS"); then
         _log "INFO" "No firewall rules found for container $CONTAINER_ID"
         return 1
     fi
 
-    if ! local RULE_IDS=$(get_container_rule_ids "$RULES"); then
+    if ! RULE_IDS=$(get_container_rule_ids "$RULES"); then
         _log "INFO" "No firewall rule ids found for container $CONTAINER_ID"
         return 1
     fi
 
-    _log "Rules to process: $(echo $RULE_IDS | wc -w)"
+    _log "Rules to process: $(echo "$RULE_IDS" | wc -w)"
 
     for RULE_ID in $RULE_IDS; do
         _log "DEBUG" "Rule ID=$RULE_ID"
 
-        local RULE=$(echo "$RULES" | grep -P "firewall\.rules\.${RULE_ID}\.")
-
-        if ! validate_rule "$RULE"; then
-            _log "WARNING" "Rule is invalid, ignoring rule"
+        if ! RULE=$(get_rule "$RULES" "$RULE_ID"); then
             continue
         fi
 
-        _log "DEBUG" "Rule is valid!"
-
-        if ! local CHAIN=$(get_rule_chain "$RULE"); then
+        if ! CHAIN=$(get_rule_chain "$RULE"); then
         	_log "WARNING" "Rule $RULE_ID CHAIN=$CHAIN is invalid, ignoring rule"
         	continue
     	fi
 
-        if ! local ACTION=$(get_rule_action "$RULE"); then
+        if ! ACTION=$(get_rule_action "$RULE"); then
         	_log "WARNING" "Rule $RULE_ID ACTION=$ACTION is invalid"
         	continue
     	fi
 
         # start building command
-        local cmd="iptables -A $CHAIN -j $ACTION"
+        cmd="iptables -A $CHAIN -j $ACTION"
 
     	if [[ "$ACTION" = "REJECT" ]]; then
-            local REJECT_WITH=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.reject_with" | cut -d '"' -f 4)
+            REJECT_WITH=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.reject_with" | cut -d '"' -f 4)
 
             _log "DEBUG" "Rule $RULE_ID REJECT_WITH=$REJECT_WITH"
 
@@ -183,7 +219,7 @@ apply_iptables_rules() {
     	    cmd="$cmd --reject-with $REJECT_WITH"
     	fi
 
-        local PROTOCOL=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.protocol" | cut -d '"' -f 4)
+        PROTOCOL=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.protocol" | cut -d '"' -f 4)
 
         _log "DEBUG" "Rule $RULE_ID PROTOCOL=$PROTOCOL"
 
@@ -192,7 +228,7 @@ apply_iptables_rules() {
         	continue
     	fi
 
-        local SRC=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.src" | cut -d '"' -f 4)
+        SRC=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.src" | cut -d '"' -f 4)
 
         if [[ -z "$SRC" ]]; then
             SRC="0.0.0.0/0"
@@ -205,7 +241,7 @@ apply_iptables_rules() {
         	continue
         fi
 
-        local DST=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.dst" | cut -d '"' -f 4)
+        DST=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.dst" | cut -d '"' -f 4)
 
         if [[ -z "$DST" ]]; then
             DST="0.0.0.0/0"
@@ -222,13 +258,13 @@ apply_iptables_rules() {
 
         _log "DEBUG" "cmd=$cmd"
 
-        local SPORT="N/A"
-        local DPORT="N/A"
+        SPORT="N/A"
+        DPORT="N/A"
 
         if [[ "$PROTOCOL" =~ ^tcp|udp$ ]]; then
             _log "DEBUG" "looking for port numbers"
 
-            local SPORT=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.sport" | cut -d '"' -f 4)
+            SPORT=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.sport" | cut -d '"' -f 4)
 
             _log "DEBUG" "Rule $RULE_ID SPORT=$SPORT"
 
@@ -236,7 +272,7 @@ apply_iptables_rules() {
                 cmd="$cmd --sport $SPORT"
             fi
 
-            local DPORT=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.dport" | cut -d '"' -f 4)
+            DPORT=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.dport" | cut -d '"' -f 4)
 
             _log "DEBUG" "Rule $RULE_ID DPORT=$DPORT"
 
@@ -284,7 +320,7 @@ _log "docker-firewall started, listening for events"
 _log "DEBUG" "debug log enabled"
 
 # Listen to Docker events
-docker events --filter type=container --filter event=start --filter label=firewall.enable=true | while read event; do
+docker events --filter type=container --filter event=start --filter label=firewall.enable=true | while read -r event; do
     CONTAINER_ID=$(echo "$event" | awk '{print $4}')
     CONTAINER_NAME=$(echo "$event" | sed -e 's/^.*, name=\(\S*\)).*$/\1/')
     _log "Container started name=$CONTAINER_NAME id=${CONTAINER_ID:0:8}"
