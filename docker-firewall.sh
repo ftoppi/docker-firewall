@@ -46,7 +46,7 @@ _log() {
 
 cleanup() {
     _log "INFO" "Cleanup on exit"
-    rm -rf -- "$BASE_DIR"
+    rm -vrf -- "$BASE_DIR"
     exit 0
 }
 
@@ -87,7 +87,7 @@ get_container_labels() {
 get_container_policies() {
     _log "DEBUG" "get_container_policies $1"
 
-    if ! jq -r 'with_entries(select(.key | startswith("firewall.policies")))' < "$BASE_DIR/container_labels_$1" > "$BASE_DIR/container_policies_$1"; then
+    if ! jq -r 'with_entries(select(.key | startswith("firewall.policies.")))' < "$BASE_DIR/container_labels_$1" > "$BASE_DIR/container_policies_$1"; then
         _log "INFO" "No firewall policies found for container $1"
         return 1
     fi
@@ -109,7 +109,7 @@ process_container_policy() {
             return 1
         fi
 
-        if [[ ! "$_action" =~ ^ACCEPT|REJECT|DROP$ ]]; then
+        if [[ ! "$_action" =~ ^ACCEPT|DROP$ ]]; then
             _log "WARNING" "Action=/$_action/ is invalid"
             return 1
         fi
@@ -119,12 +119,12 @@ process_container_policy() {
         cmd="nsenter -n -t "$_pid" iptables -P $_chain $_action"
 
         if [[ "$DRY_RUN" -eq 1 ]]; then
-            _log "DRY RUN MODE - Container=${object_id:0:8} would run: $cmd"
+            _log "DRY RUN MODE - Container=$object_id would run: $cmd"
             return 0
         fi
 
         if ! $cmd; then
-            _log "WARNING" "Container=${object_id:0:8} PID=$(cat "$BASE_DIR/container_pid_$1") Policy Chain=$_chain Action=$_action failed"
+            _log "WARNING" "Container=$object_id PID=$(cat "$BASE_DIR/container_pid_$1") Policy Chain=$_chain Action=$_action failed"
             return 1
         fi
     done
@@ -147,10 +147,17 @@ process_container_policies() {
 
 
 get_container_rules() {
-    if ! jq -r 'with_entries(select(.key | startswith("firewall.rules")))' < "$BASE_DIR/container_labels_$1" > "$BASE_DIR/container_rules_$1"; then
+    _log "DEBUG" "get_container_rules $1"
+
+    if ! jq -r 'with_entries(select(.key | startswith("firewall.rules.")))' < "$BASE_DIR/container_labels_$1" > "$BASE_DIR/container_rules_$1"; then
         _log "INFO" "No firewall rules found for container $1"
         return 1
     fi
+
+    local _count
+    _count=$(( $(wc -l < "$BASE_DIR/container_rules_$1") - 2 ))
+
+    _log "DEBUG" "Found $_count rules for container $1"
 
     return 0
 }
@@ -163,6 +170,11 @@ get_container_rule_ids() {
         _log "INFO" "No firewall rule ids found for container $1"
         return 1
     fi
+
+    local _count
+    _count=$(( $(wc -l < "$BASE_DIR/container_rule_ids_$1") - 2 ))
+
+    _log "DEBUG" "Found $_count rule IDs for container $1"
 
     return 0
 }
@@ -183,32 +195,80 @@ validate_rule_chain_count() {
 
 
 get_rule_chain() {
-    validate_rule_chain_count "$1" || return 1
+    # $1: container|network
+    # $2: object id
+    # $3: chain id
 
-    local CHAIN
-
-    CHAIN=$(echo "$1" | head -n1 | cut -d '.' -f 4)
-
-    if [[ ! "$CHAIN" =~ ^INPUT|OUTPUT|FORWARD$ ]]; then
-        _log "WARNING" "Rule CHAIN=$CHAIN is invalid, ignoring rule"
+    if [[ ! "$1" =~ ^container|network$ ]]; then
+        _log "WARNING" "Call get_rule_chain invalid type=$1 invalid, ignoring rule"
         return 1
     fi
 
-    echo "$CHAIN"
+    local _chain
+
+    if ! _chain=$(grep -E "firewall.rules.${3}." "$BASE_DIR/${1}_rules_$2" 2>/dev/null | head -n1 | cut -d '.' -f 4); then
+        _log "WARNING" "$1 $2 rule $3 is invalid, ignoring rule"
+        return 1
+    fi
+
+    if [[ ! "$_chain" =~ ^INPUT|OUTPUT|FORWARD$ ]]; then
+        _log "WARNING" "$1 $2 rule $3 chain=$_chain is invalid, ignoring rule"
+        return 1
+    fi
+
+    echo "$_chain"
+}
+
+
+get_rule_protocol() {
+    # $1: container|network
+    # $2: object id
+    # $3: chain id
+
+    if [[ ! "$1" =~ ^container|network$ ]]; then
+        _log "WARNING" "Call get_rule_protocol invalid type=$1 invalid, ignoring rule"
+        return 1
+    fi
+
+    local _protocol
+    
+    # protocol may be omitted
+    set +o pipefail
+    _protocol=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.protocol" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4)
+    set -o pipefail
+
+    if [[ -n "$_protocol" ]] && [[ ! "$_protocol" =~ ^tcp|udp$ ]]; then
+        _log "WARNING" "$1 $2 rule $3 protocol=$_protocol is invalid, ignoring rule"
+        return 1
+    fi
+
+    echo "$_protocol"
 }
 
 
 get_rule_action() {
-    local ACTION
+    # $1: container|network
+    # $2: object id
+    # $3: chain id
 
-    ACTION=$(echo "$1" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.action" | cut -d '"' -f 4)
-
-    if [[ ! "$ACTION" =~ ^ACCEPT|REJECT|DROP|LOG$ ]]; then
-        _log "WARNING" "Rule ACTION=$ACTION is invalid, ignoring rule"
+    if [[ ! "$1" =~ ^container|network$ ]]; then
+        _log "WARNING" "Call get_rule_action invalid type=$1 invalid, ignoring rule"
         return 1
     fi
 
-    echo "$ACTION"
+    local _action
+
+    if ! _action=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.action" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4); then
+        _log "WARNING" "$1 $2 rule $3 is invalid, ignoring rule"
+        return 1
+    fi
+
+    if [[ ! "$_action" =~ ^ACCEPT|DROP|REJECT$ ]]; then
+        _log "WARNING" "$1 $2 rule $3 action=$_action is invalid, ignoring rule"
+        return 1
+    fi
+
+    echo "$_action"
 }
 
 
@@ -228,17 +288,45 @@ get_rule() {
 }
 
 
+process_container_rule() {
+    _log "DEBUG" "process_container_rule_id $1 id=$2"
+
+    _chain=$(get_rule_chain         "container" "$1" "$2") || { _log "WARNING" "get_rule_chain failed"; return 1; }
+    _protocol=$(get_rule_protocol   "container" "$1" "$2") || { _log "WARNING" "get_rule_protocol failed"; return 1; }
+    _action=$(get_rule_action       "container" "$1" "$2") || { _log "WARNING" "get_rule_action failed"; return 1; }
+
+    _log "$_chain $_protocol $_action"
+}
+
+
+process_container_rules() {
+    _log "DEBUG" "process_container_rules $1"
+
+    local rule_id
+
+    while read rule_id; do
+        process_container_rule "$1" "$rule_id" || _log "ERROR" "Something went wrong"
+    done < "$BASE_DIR/container_rule_ids_$1"
+}
+
+
 process_event_container() {
     _log "DEBUG" "New event $event_type action=$event_action object_id=$object_id"
 
     _pid=$(get_container_pid    "$object_id") || return 1
-    _log "DEBUG" "process_event_container _pid=$_pid"
+    _log "DEBUG" "====="
+
     get_container_labels        "$object_id"  || return 1
+    _log "DEBUG" "====="
+
     process_container_policies  "$object_id"  || return 1
+    _log "DEBUG" "====="
+
     get_container_rules         "$object_id"  || return 1
     get_container_rule_ids      "$object_id"  || return 1
+    process_container_rules     "$object_id"  || return 1
 
-    cleanup_container           "$object_id"
+    # cleanup_container           "$object_id"
 }
 
 
@@ -252,10 +340,7 @@ toto() {
             continue
         fi
 
-        if ! CHAIN=$(get_rule_chain "$RULE"); then
-        	_log "WARNING" "Rule $RULE_ID CHAIN=$CHAIN is invalid, ignoring rule"
-        	continue
-    	fi
+
 
         if ! ACTION=$(get_rule_action "$RULE"); then
         	_log "WARNING" "Rule $RULE_ID ACTION=$ACTION is invalid"
@@ -419,4 +504,5 @@ fi
 # Listen to Docker events
 docker events --filter type=container --filter type=network --filter event=start --filter event=create --filter event=destroy --filter label=firewall.enable=true | while read -r event; do
     process_event "$event"
+    _log "DEBUG" "=========="
 done
