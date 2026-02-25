@@ -8,8 +8,15 @@ set -euo pipefail
 # - The script only supports IPv4.
 # - The script relies on jq for JSON parsing.
 
-readonly LOG_LEVEL="${LOG_LEVEL:-INFO}" # set to DEBUG to print debug logs
+readonly DEBUG="${DEBUG:-0}" # set to 1 to print debug logs
 readonly DRY_RUN="${DRY_RUN:-0}"
+
+readonly NOW="$(date +%Y%m%d_%H%M%S)"
+readonly BASE_DIR="/dev/shm/dfw.${NOW}"
+
+# initialize base directory
+rm -rf -- "$BASE_DIR"
+mkdir -p "$BASE_DIR"
 
 
 _log() {
@@ -29,7 +36,7 @@ _log() {
         date="$(date -Iseconds)"
     fi
 
-    if [[ "$level" == "DEBUG" ]] && [[ "$LOG_LEVEL" != "DEBUG" ]]; then
+    if [[ "$level" == "DEBUG" ]] && [[ "$DEBUG" != "1" ]]; then
         return
     fi
 
@@ -37,55 +44,127 @@ _log() {
 }
 
 
+cleanup() {
+    _log "INFO" "Cleanup on exit"
+    rm -rf -- "$BASE_DIR"
+    exit 0
+}
+
+cleanup_container() {
+    _log "INFO" "Cleanup container $1 files"
+    find "$BASE_DIR" -type f -name "*_$1" -ls -delete
+}
+
+trap cleanup INT
+
+
 get_container_pid() {
-    local PID
+    _pid=$(docker inspect --format '{{.State.Pid}}' "$1" 2>/dev/null)
 
-    PID=$(docker inspect --format '{{.State.Pid}}' "$1")
-
-    if [[ -z "$PID" ]]; then
+    if [[ -z "$_pid" ]]; then
+        _log "ERROR" "Failed to get PID for container $1"
         return 1
     fi
 
-    echo "$PID"
+    echo "$_pid"
+
+    return 0
 }
 
 
 get_container_labels() {
-    local LABELS
+    _log "DEBUG" "get_container_labels $1"
 
-    LABELS=$(docker inspect --format '{{json .Config.Labels}}' "$1")
-
-    if [[ -z "$LABELS" ]]; then
+    if ! docker inspect --format '{{json .Config.Labels}}' "$1" > "$BASE_DIR/container_labels_$1"; then
+        _log "ERROR" "Failed to get labels for container $1"
         return 1
     fi
 
-    echo "$LABELS"
+    return 0
+}
+
+
+get_container_policies() {
+    _log "DEBUG" "get_container_policies $1"
+
+    if ! jq -r 'with_entries(select(.key | startswith("firewall.policies")))' < "$BASE_DIR/container_labels_$1" > "$BASE_DIR/container_policies_$1"; then
+        _log "INFO" "No firewall policies found for container $1"
+        return 1
+    fi
+
+    return 0
+}
+
+
+process_container_policy() {
+    _log "DEBUG" "process_container_policy _pid=$_pid $1"
+
+    echo "$1" | while read -r _chain _action; do
+        _log "DEBUG" "Policy Chain=$_chain Action=$_action"
+        _chain="$(echo "$_chain" | sed -e 's/^.*\.\([A-Z]*\)":.*$/\1/')"
+        _action="$(echo "$_action" | cut -d '"' -f 2)"
+
+        if [[ ! "$_chain" =~ ^INPUT|OUTPUT|FORWARD$ ]]; then
+            _log "WARNING" "Policy Chain=/$_chain/ is invalid"
+            return 1
+        fi
+
+        if [[ ! "$_action" =~ ^ACCEPT|REJECT|DROP$ ]]; then
+            _log "WARNING" "Action=/$_action/ is invalid"
+            return 1
+        fi
+
+        _log "DEBUG" "Policy Chain=$_chain Action=$_action is valid"
+
+        cmd="nsenter -n -t "$_pid" iptables -P $_chain $_action"
+
+        if [[ "$DRY_RUN" -eq 1 ]]; then
+            _log "DRY RUN MODE - Container=${object_id:0:8} would run: $cmd"
+            return 0
+        fi
+
+        if ! $cmd; then
+            _log "WARNING" "Container=${object_id:0:8} PID=$(cat "$BASE_DIR/container_pid_$1") Policy Chain=$_chain Action=$_action failed"
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+
+process_container_policies() {
+    _log "DEBUG" "process_container_policies $1"
+
+    get_container_policies "$1" || return 1
+
+    grep "firewall.policies" "$BASE_DIR/container_policies_$1" | while read -r policy; do
+        process_container_policy "$policy"
+    done
+
+    return 0
 }
 
 
 get_container_rules() {
-    local RULES
-
-    RULES=$(echo "$1" | jq -r | grep -P '^  "firewall\.rules\.')
-
-    if [[ -z "$RULES" ]]; then
+    if ! jq -r 'with_entries(select(.key | startswith("firewall.rules")))' < "$BASE_DIR/container_labels_$1" > "$BASE_DIR/container_rules_$1"; then
+        _log "INFO" "No firewall rules found for container $1"
         return 1
     fi
 
-    echo "$RULES"
+    return 0
 }
 
 
 get_container_rule_ids() {
-    local RULE_IDS
+    _log "DEBUG" "get_container_rule_ids $1"
 
-    RULE_IDS=$(echo "$1" | cut -d '.' -f 3 | sort -u | grep -P '^[[:alnum:]]*$')
-
-    if [[ -z "$RULE_IDS" ]]; then
+    if ! grep "firewall.rules" "$BASE_DIR/container_rules_$1" | cut -d '.' -f 3 | sort -u | grep -P '^[[:alnum:]]*$' > "$BASE_DIR/container_rule_ids_$1"; then
+        _log "INFO" "No firewall rule ids found for container $1"
         return 1
     fi
 
-    echo "$RULE_IDS"
+    return 0
 }
 
 
@@ -98,6 +177,8 @@ validate_rule_chain_count() {
         _log "WARNING" "Rule chain count ($CHAIN_COUNT) is invalid, ignoring rule"
         return 1
     fi
+
+    return 0
 }
 
 
@@ -147,43 +228,21 @@ get_rule() {
 }
 
 
-apply_iptables_rules() {
-    local CONTAINER_ID="$1"
-    local PID
-    local LABELS
-    local RULES
-    local RULE_IDS
-    local RULE
-    local CHAIN
-    local ACTION
-    local REJECT_WITH
-    local PROTOCOL
-    local SRC
-    local DST
-    local SPORT
-    local DPORT
-    local cmd
+process_event_container() {
+    _log "DEBUG" "New event $event_type action=$event_action object_id=$object_id"
 
-    if ! PID=$(get_container_pid "$CONTAINER_ID"); then
-        _log "ERROR" "Failed to get PID for container $CONTAINER_ID"
-        return 1
-    fi
+    _pid=$(get_container_pid    "$object_id") || return 1
+    _log "DEBUG" "process_event_container _pid=$_pid"
+    get_container_labels        "$object_id"  || return 1
+    process_container_policies  "$object_id"  || return 1
+    get_container_rules         "$object_id"  || return 1
+    get_container_rule_ids      "$object_id"  || return 1
 
-    if ! LABELS=$(get_container_labels "$CONTAINER_ID"); then
-        _log "ERROR" "Failed to get labels for container $CONTAINER_ID"
-        return 1
-    fi
+    cleanup_container           "$object_id"
+}
 
-    if ! RULES=$(get_container_rules "$LABELS"); then
-        _log "INFO" "No firewall rules found for container $CONTAINER_ID"
-        return 1
-    fi
 
-    if ! RULE_IDS=$(get_container_rule_ids "$RULES"); then
-        _log "INFO" "No firewall rule ids found for container $CONTAINER_ID"
-        return 1
-    fi
-
+toto() {
     _log "Rules to process: $(echo "$RULE_IDS" | wc -w)"
 
     for RULE_ID in $RULE_IDS; do
@@ -283,22 +342,55 @@ apply_iptables_rules() {
             _log "DEBUG" "cmd=$cmd"
         fi
 
-        _log "DEBUG" "Container=${CONTAINER_ID:0:8} PID=$PID RULE_ID=$RULE_ID is valid, applying CHAIN=$CHAIN ACTION=$ACTION PROTOCOL=$PROTOCOL SRC=$SRC DST=$DST SPORT=$SPORT DPORT=$DPORT"
+        _log "DEBUG" "Container=${object_id:0:8} PID=$PID RULE_ID=$RULE_ID is valid, applying CHAIN=$CHAIN ACTION=$ACTION PROTOCOL=$PROTOCOL SRC=$SRC DST=$DST SPORT=$SPORT DPORT=$DPORT"
         _log "DEBUG" "cmd=$cmd"
 
         if [[ "$DRY_RUN" -eq 1 ]]; then
-            _log "DRY RUN MODE - Container=${CONTAINER_ID:0:8} would run: nsenter -n -t $PID $cmd"
+            _log "DRY RUN MODE - Container=${object_id:0:8} would run: nsenter -n -t $PID $cmd"
             continue
         fi
 
         if ! nsenter -n -t "$PID" $cmd; then
-            _log "WARNING" "Container=${CONTAINER_ID:0:8} PID=$PID RULE_ID=$RULE_ID failed"
+            _log "WARNING" "Container=${object_id:0:8} PID=$PID RULE_ID=$RULE_ID failed"
             continue
         fi
 
-        _log "Container=${CONTAINER_ID:0:8} PID=$PID RULE_ID=$RULE_ID applied successfully cmd=$cmd"
+        _log "Container=${object_id:0:8} PID=$PID RULE_ID=$RULE_ID applied successfully cmd=$cmd"
     done
 }
+
+
+process_event_network() {
+    _log "DEBUG" "New event network   $event"
+    return
+}
+
+
+process_event() {
+    local event_type
+    local event_action
+    local object_id
+
+    event_type=$(echo "$1" | awk '{print $2}')
+    event_action=$(echo "$1" | awk '{print $3}')
+    object_id=$(echo "$1" | awk '{print substr($4, 1, 12)}')
+
+    case "$event_type" in
+        "container")
+            process_event_container
+            ;;
+
+        "network")
+            process_event_network
+            ;;
+
+        *)
+            _log "ERROR" "Event type=$event_type unsupported"
+            return 1
+            ;;
+    esac
+}
+
 
 if [[ "$(id -u)" -ne 0 ]]; then
     _log "ERROR" "This script must be run as root."
@@ -319,11 +411,12 @@ _log "docker-firewall started, listening for events"
 
 _log "DEBUG" "debug log enabled"
 
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    _log "INFO" "DRY RUN enabled"
+fi
+
+
 # Listen to Docker events
-docker events --filter type=container --filter event=start --filter label=firewall.enable=true | while read -r event; do
-    CONTAINER_ID=$(echo "$event" | awk '{print $4}')
-    CONTAINER_NAME=$(echo "$event" | sed -e 's/^.*, name=\(\S*\)).*$/\1/')
-    _log "Container started name=$CONTAINER_NAME id=${CONTAINER_ID:0:8}"
-    apply_iptables_rules "$CONTAINER_ID"
-    _log "Container rules processed"
+docker events --filter type=container --filter type=network --filter event=start --filter event=create --filter event=destroy --filter label=firewall.enable=true | while read -r event; do
+    process_event "$event"
 done
