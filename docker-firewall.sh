@@ -358,11 +358,6 @@ process_container_rule() {
     _chain=$(get_rule_chain         "container" "$1" "$2") || { _log "WARNING" "get_rule_chain failed"; return 1; }
     _cmd="iptables -A $_chain"
 
-    _protocol=$(get_rule_protocol   "container" "$1" "$2") || { _log "WARNING" "get_rule_protocol failed"; return 1; }
-    if [[ -n "$_protocol" ]]; then
-        _cmd="$_cmd -p $_protocol"
-    fi
-
     if [[ "$_chain" = "INPUT" ]]; then
         _src=$(get_rule_srcdst         "container" "$1" "$2" "src") || { _log "WARNING" "get_rule_srcdst src failed"; return 1; }
         if [[ -n "$_src" ]]; then
@@ -380,6 +375,10 @@ process_container_rule() {
             _cmd="$_cmd -d $_dst"
         fi
     fi
+
+    _protocol=$(get_rule_protocol   "container" "$1" "$2") || { _log "WARNING" "get_rule_protocol failed"; return 1; }
+    if [[ -n "$_protocol" ]]; then
+        _cmd="$_cmd -p $_protocol"
     fi
 
     if [[ -n "$_protocol" ]]; then
