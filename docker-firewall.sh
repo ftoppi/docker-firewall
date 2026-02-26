@@ -233,7 +233,7 @@ get_rule_protocol() {
     fi
 
     local _protocol
-    
+
     # protocol may be omitted
     set +o pipefail
     _protocol=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.protocol" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4)
@@ -335,6 +335,30 @@ get_rule_srcdst() {
     echo "$_srcdst"
 }
 
+get_rule_state() {
+    # $1: container|network
+    # $2: object id
+    # $3: chain id
+
+    if [[ ! "$1" =~ ^(container|network)$ ]]; then
+        _log "WARNING" "Call get_rule_state invalid type=$1, ignoring rule"
+        return 1
+    fi
+
+    local _state
+
+    set +o pipefail
+    _state=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.state" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'a-z' 'A-Z')
+    set -o pipefail
+
+    if [[ ! "$_state" =~ ^(RELATED,ESTABLISHED|ESTABLISHED,RELATED|ESTABLISHED|RELATED|)$ ]]; then
+        _log "WARNING" "$1 $2 rule $3 state=$_state is invalid, ignoring rule"
+        return 1
+    fi
+
+    echo "$_state"
+}
+
 
 get_rule() {
     local RULES="$1"
@@ -355,7 +379,13 @@ get_rule() {
 process_container_rule() {
     _log "DEBUG" "process_container_rule_id $1 id=$2"
 
+    local _chain
     local _cmd
+    local _src
+    local _dst
+    local _protocol
+    local _state
+    local _action
 
     _chain=$(get_rule_chain         "container" "$1" "$2") || { _log "WARNING" "get_rule_chain failed"; return 1; }
     _cmd="iptables -A $_chain"
@@ -396,6 +426,12 @@ process_container_rule() {
         if [[ -n "$_dport" ]]; then
             _cmd="$_cmd --dport $_dport"
         fi
+    fi
+
+    _state=$(get_rule_state "container" "$1" "$2") || { _log "WARNING" "get_rule_state failed"; return 1; }
+
+    if [[ -n "$_state" ]] ; then
+        _cmd="$_cmd -m state --state $_state"
     fi
 
     _action=$(get_rule_action       "container" "$1" "$2") || { _log "WARNING" "get_rule_action failed"; return 1; }
