@@ -303,6 +303,37 @@ get_rule_port() {
 }
 
 
+get_rule_srcdst() {
+    # $1: container|network
+    # $2: object id
+    # $3: chain id
+    # $4: src|dst
+
+    if [[ ! "$1" =~ ^(container|network)$ ]]; then
+        _log "WARNING" "Call get_rule_srcdst invalid type=$1, ignoring rule"
+        return 1
+    fi
+
+    if [[ ! "$4" =~ ^(src|dst)$ ]]; then
+        _log "WARNING" "Call get_rule_srcdst invalid srcdst=$4, ignoring rule"
+        return 1
+    fi
+
+    local _srcdst
+
+    set +o pipefail
+    _srcdst=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.${4}" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4)
+    set -o pipefail
+
+    if [[ -n "$_srcdst" ]] && [[ ! "$_srcdst" =~ ^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\/(3[0-2]|[12]?[0-9]))?$ ]]; then
+        _log "WARNING" "$1 $2 rule $3 _srcdst=$_srcdst is invalid, ignoring rule"
+        return 1
+    fi
+
+    echo "$_srcdst"
+}
+
+
 get_rule() {
     local RULES="$1"
     local RULE_ID="$2"
@@ -333,11 +364,22 @@ process_container_rule() {
     fi
 
     if [[ "$_chain" = "INPUT" ]]; then
+        _src=$(get_rule_srcdst         "container" "$1" "$2" "src") || { _log "WARNING" "get_rule_srcdst src failed"; return 1; }
+        if [[ -n "$_src" ]]; then
+            _cmd="$_cmd -s $_src"
+        fi
+
         _dst="0.0.0.0/0"
     fi
 
     if [[ "$_chain" = "OUTPUT" ]]; then
         _src="0.0.0.0/0"
+
+        _dst=$(get_rule_srcdst         "container" "$1" "$2" "dst") || { _log "WARNING" "get_rule_srcdst dst failed"; return 1; }
+        if [[ -n "$_dst" ]]; then
+            _cmd="$_cmd -d $_dst"
+        fi
+    fi
     fi
 
     if [[ -n "$_protocol" ]]; then
