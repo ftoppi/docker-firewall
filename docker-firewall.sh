@@ -99,6 +99,8 @@ get_container_policies() {
 
 
 process_container_policy() {
+    # $1: policy
+
     _log "DEBUG" "process_container_policy _pid=$_pid $1"
 
     echo "$1" | while read -r _chain _action; do
@@ -379,6 +381,9 @@ get_rule() {
 
 
 process_container_rule() {
+    # $1: object id
+    # $2: rule id
+
     _log "DEBUG" "process_container_rule_id $1 id=$2"
 
     local _chain
@@ -454,6 +459,8 @@ process_container_rule() {
 
 
 process_container_rules() {
+    # $1: object id
+
     _log "DEBUG" "process_container_rules $1"
 
     local rule_id
@@ -485,121 +492,6 @@ process_event_container() {
     process_container_rules     "$object_id"  || return 1
 
     # cleanup_container           "$object_id"
-}
-
-
-toto() {
-    _log "Rules to process: $(echo "$RULE_IDS" | wc -w)"
-
-    for RULE_ID in $RULE_IDS; do
-        _log "DEBUG" "Rule ID=$RULE_ID"
-
-        if ! RULE=$(get_rule "$RULES" "$RULE_ID"); then
-            continue
-        fi
-
-
-
-        if ! ACTION=$(get_rule_action "$RULE"); then
-        	_log "WARNING" "Rule $RULE_ID ACTION=$ACTION is invalid"
-        	continue
-    	fi
-
-        # start building command
-        cmd="iptables -A $CHAIN -j $ACTION"
-
-    	if [[ "$ACTION" = "REJECT" ]]; then
-            REJECT_WITH=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.reject_with" | cut -d '"' -f 4)
-
-            _log "DEBUG" "Rule $RULE_ID REJECT_WITH=$REJECT_WITH"
-
-    	    if [[ ! "$REJECT_WITH" =~ ^icmp-net-unreachable|icmp-host-unreachable|icmp-port-unreachable|icmp-proto-unreachable|icmp-net-prohibited|icmp-host-prohib‐ited|icmp-admin-prohibited$ ]]; then
-    	        _log "WARNING" "Rule $RULE_ID REJECT_WITH=$REJECT_WITH is invalid"
-    	        continue
-    	    fi
-
-    	    cmd="$cmd --reject-with $REJECT_WITH"
-    	fi
-
-        PROTOCOL=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.protocol" | cut -d '"' -f 4)
-
-        _log "DEBUG" "Rule $RULE_ID PROTOCOL=$PROTOCOL"
-
-        if [[ ! "$PROTOCOL" =~ ^all|tcp|udp|icmp|ip$ ]]; then
-        	_log "WARNING" "Rule $RULE_ID PROTOCOL=$PROTOCOL is invalid"
-        	continue
-    	fi
-
-        SRC=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.src" | cut -d '"' -f 4)
-
-        if [[ -z "$SRC" ]]; then
-            SRC="0.0.0.0/0"
-        fi
-
-        _log "DEBUG" "Rule $RULE_ID SRC=$SRC"
-
-        if [[ ! "$SRC" =~ ^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\/([0-9]|[1-2][0-9]|3[0-2]))?$ ]]; then
-        	_log "WARNING" "Rule $RULE_ID SRC=$SRC is invalid"
-        	continue
-        fi
-
-        DST=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.dst" | cut -d '"' -f 4)
-
-        if [[ -z "$DST" ]]; then
-            DST="0.0.0.0/0"
-        fi
-
-        _log "DEBUG" "Rule $RULE_ID DST=$DST"
-
-        if [[ ! "$DST" =~ ^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\/([0-9]|[1-2][0-9]|3[0-2]))?$ ]]; then
-        	_log "WARNING" "Rule $RULE_ID DST=$DST is invalid"
-        	continue
-        fi
-
-        cmd="$cmd -p $PROTOCOL -s $SRC -d $DST"
-
-        _log "DEBUG" "cmd=$cmd"
-
-        SPORT="N/A"
-        DPORT="N/A"
-
-        if [[ "$PROTOCOL" =~ ^tcp|udp$ ]]; then
-            _log "DEBUG" "looking for port numbers"
-
-            SPORT=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.sport" | cut -d '"' -f 4)
-
-            _log "DEBUG" "Rule $RULE_ID SPORT=$SPORT"
-
-            if [[ "$SPORT" =~ ^[0-9]+$ ]] && [[ "$SPORT" -gt "0" ]]; then
-                cmd="$cmd --sport $SPORT"
-            fi
-
-            DPORT=$(echo "$RULE" | grep -E "firewall.rules.${RULE_ID}.${CHAIN}.dport" | cut -d '"' -f 4)
-
-            _log "DEBUG" "Rule $RULE_ID DPORT=$DPORT"
-
-            if [[ "$DPORT" =~ ^[0-9]+$ ]] && [[ "$DPORT" -gt "0" ]]; then
-                cmd="$cmd --dport $DPORT"
-            fi
-
-            _log "DEBUG" "cmd=$cmd"
-        fi
-
-        _log "DEBUG" "Container=${object_id:0:8} PID=$PID RULE_ID=$RULE_ID is valid, applying CHAIN=$CHAIN ACTION=$ACTION PROTOCOL=$PROTOCOL SRC=$SRC DST=$DST SPORT=$SPORT DPORT=$DPORT"
-        _log "DEBUG" "cmd=$cmd"
-
-        if [[ "$DRY_RUN" -eq 1 ]]; then
-            _log "DRY RUN MODE - Container=${object_id:0:8} would run: nsenter -n -t $PID $cmd"
-            continue
-        fi
-
-        if ! nsenter -n -t "$PID" $cmd; then
-            _log "WARNING" "Container=${object_id:0:8} PID=$PID RULE_ID=$RULE_ID failed"
-            continue
-        fi
-
-        _log "Container=${object_id:0:8} PID=$PID RULE_ID=$RULE_ID applied successfully cmd=$cmd"
-    done
 }
 
 
