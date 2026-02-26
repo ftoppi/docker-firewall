@@ -2,11 +2,38 @@
 set -euo pipefail
 
 # Design choices:
+# - The script is not targeted at companies and professional environments where security is paramount and related services are legion. I have less than 10 rules (policies included) per container.
 # - The script does not remove rules when a container is stopped. Instead, it relies the namespace being deleted, and its associated rules with it.
-# - The script does not support rules applied at the network level. This is intended to not have to cleanup rules on network destruction.
+# - The script does not support rules applied at the network level *YET*. This is intended to not have to cleanup rules on network destruction.
 # - The script is written in Bash, which should tell you it is not meant for performance. It is not meant for busy systems where containers start all the time.
 # - The script only supports IPv4.
 # - The script relies on jq for JSON parsing.
+# - The script does not prevent you from making mistakes and blocking access to containers.
+# - The script sorts rules by keys before applying them.
+# - The script uses legacy iptables rules for now.
+# - The script stores temporary files in /dev/shm and deletes them when the rules are successfully processed and when the script exits.
+# - The script listens to Docker events and only cares about the 2nd, 3rd and 4th fields: object type, event type and object id. The other fields are ignored. The script then calls docker inspect to gather the required information.
+
+# Todo:
+# - Support rules at the network level, which implies cleaning up the rules when the network is destroyed.
+# - Support modern netfilter rules instead of legacy iptables rules.
+# - Standardize log messages.
+# - Benchmark the script.
+
+# Sample docker event for a container:
+# 2026-02-26T16:20:50.696813500+01:00 container start  07a46f3102baee08d941d57218ac249aa63a8d91cb2bbd4025146f5643c73fc6 foobar
+
+# Sample labels for a container, in `docker-compose.yml`:
+# labels:
+#   - firewall.enable=true
+#   - firewall.policies.INPUT=DROP
+#   - firewall.policies.OUTPUT=DROP
+#   - firewall.rules.000.OUTPUT.state=related,established
+#   - firewall.rules.000.OUTPUT.action=accept
+#   - firewall.rules.010.INPUT.action=accept
+#   - firewall.rules.010.INPUT.protocol=tcp
+#   - firewall.rules.010.INPUT.dport=80
+
 
 readonly DEBUG="${DEBUG:-0}" # set to 1 to print debug logs
 readonly DRY_RUN="${DRY_RUN:-0}"
@@ -491,7 +518,7 @@ process_event_container() {
     get_container_rule_ids      "$object_id"  || return 1
     process_container_rules     "$object_id"  || return 1
 
-    # cleanup_container           "$object_id"
+    cleanup_container           "$object_id"
 }
 
 
