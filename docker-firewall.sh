@@ -208,7 +208,7 @@ get_rule_chain() {
 
     local _chain
 
-    if ! _chain=$(grep -E "firewall.rules.${3}." "$BASE_DIR/${1}_rules_$2" 2>/dev/null | head -n1 | cut -d '.' -f 4); then
+    if ! _chain=$(grep -E "firewall.rules.${3}." "$BASE_DIR/${1}_rules_$2" 2>/dev/null | head -n1 | cut -d '.' -f 4 | tr 'a-z' 'A-Z'); then
         _log "WARNING" "$1 $2 rule $3 is invalid, ignoring rule"
         return 1
     fi
@@ -236,7 +236,7 @@ get_rule_protocol() {
 
     # protocol may be omitted
     set +o pipefail
-    _protocol=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.protocol" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4)
+    _protocol=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.protocol" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'A-Z' 'a-z')
     set -o pipefail
 
     if [[ -n "$_protocol" ]] && [[ ! "$_protocol" =~ ^tcp|udp$ ]]; then
@@ -260,7 +260,7 @@ get_rule_action() {
 
     local _action
 
-    if ! _action=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.action" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4); then
+    if ! _action=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.action" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'a-z' 'A-Z'); then
         _log "WARNING" "$1 $2 rule $3 is invalid, ignoring rule"
         return 1
     fi
