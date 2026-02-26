@@ -385,12 +385,12 @@ process_container_rule() {
         local _sport
         local _dport
 
-        _sport=$(get_rule_port         "container" "$1" "$2" "sport")
+        _sport=$(get_rule_port         "container" "$1" "$2" "sport") || { _log "WARNING" "get_rule_port sport failed"; return 1; }
         if [[ -n "$_sport" ]]; then
             _cmd="$_cmd --sport $_sport"
         fi
 
-        _dport=$(get_rule_port         "container" "$1" "$2" "dport")
+        _dport=$(get_rule_port         "container" "$1" "$2" "dport") || { _log "WARNING" "get_rule_port dport failed"; return 1; }
         if [[ -n "$_dport" ]]; then
             _cmd="$_cmd --dport $_dport"
         fi
