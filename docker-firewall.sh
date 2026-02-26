@@ -437,7 +437,17 @@ process_container_rule() {
     _action=$(get_rule_action       "container" "$1" "$2") || { _log "WARNING" "get_rule_action failed"; return 1; }
     _cmd="$_cmd -j $_action"
 
-    _log "DEBUG" "_cmd=$_cmd"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        _log "DRY RUN MODE - Container=$1 pid=$_pid would run: $_cmd"
+        return 0
+    fi
+
+    if ! $_cmd; then
+        _log "WARNING" "Container=$1 PID=$(cat "$BASE_DIR/container_pid_$1") Policy Chain=$_chain Action=$_action failed"
+        return 1
+    fi
+
+    _log INFO "Applied successfully: $_cmd"
 }
 
 
