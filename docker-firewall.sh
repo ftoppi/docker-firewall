@@ -129,6 +129,8 @@ process_container_policy() {
             _log "WARNING" "Container=$object_id PID=$(cat "$BASE_DIR/container_pid_$1") Policy Chain=$_chain Action=$_action failed"
             return 1
         fi
+
+        _log INFO "Applied policy successfully chain=$_chain action=$_action"
     done
 
     return 0
