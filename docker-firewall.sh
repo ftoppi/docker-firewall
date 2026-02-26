@@ -417,6 +417,10 @@ process_container_rules() {
 process_event_container() {
     _log "DEBUG" "New event $event_type action=$event_action object_id=$object_id"
 
+    if [[ "$event_action" != "start" ]]; then
+        return
+    fi
+
     _pid=$(get_container_pid    "$object_id") || return 1
     _log "DEBUG" "====="
 
