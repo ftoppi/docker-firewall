@@ -388,7 +388,7 @@ process_container_rule() {
     local _action
 
     _chain=$(get_rule_chain         "container" "$1" "$2") || { _log "WARNING" "get_rule_chain failed"; return 1; }
-    _cmd="iptables -A $_chain"
+    _cmd="nsenter -n -t $_pid iptables -A $_chain -m comment --comment $2"
 
     if [[ "$_chain" = "INPUT" ]]; then
         _src=$(get_rule_srcdst         "container" "$1" "$2" "src") || { _log "WARNING" "get_rule_srcdst src failed"; return 1; }
