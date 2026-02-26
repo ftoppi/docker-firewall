@@ -103,8 +103,8 @@ process_container_policy() {
 
     echo "$1" | while read -r _chain _action; do
         _log "DEBUG" "Policy Chain=$_chain Action=$_action"
-        _chain="$(echo "$_chain" | sed -e 's/^.*\.\([A-Z]*\)":.*$/\1/')"
-        _action="$(echo "$_action" | cut -d '"' -f 2)"
+        _chain="$(echo "$_chain" | sed -e 's/^.*\.\([A-Z]*\)":.*$/\1/' | tr 'a-z' 'A-Z')"
+        _action="$(echo "$_action" | cut -d '"' -f 2 | tr 'a-z' 'A-Z')"
 
         if [[ ! "$_chain" =~ ^(INPUT|OUTPUT|FORWARD)$ ]]; then
             _log "WARNING" "Policy Chain=/$_chain/ is invalid"
