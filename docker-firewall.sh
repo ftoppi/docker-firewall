@@ -11,8 +11,8 @@ set -euo pipefail
 readonly DEBUG="${DEBUG:-0}" # set to 1 to print debug logs
 readonly DRY_RUN="${DRY_RUN:-0}"
 
-readonly NOW
 NOW="$(date +%Y%m%d_%H%M%S)"
+readonly NOW
 
 readonly BASE_DIR="/dev/shm/dfw.${NOW}"
 
