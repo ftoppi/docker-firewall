@@ -104,12 +104,12 @@ process_container_policy() {
         _chain="$(echo "$_chain" | sed -e 's/^.*\.\([A-Z]*\)":.*$/\1/')"
         _action="$(echo "$_action" | cut -d '"' -f 2)"
 
-        if [[ ! "$_chain" =~ ^INPUT|OUTPUT|FORWARD$ ]]; then
+        if [[ ! "$_chain" =~ ^(INPUT|OUTPUT|FORWARD)$ ]]; then
             _log "WARNING" "Policy Chain=/$_chain/ is invalid"
             return 1
         fi
 
-        if [[ ! "$_action" =~ ^ACCEPT|DROP$ ]]; then
+        if [[ ! "$_action" =~ ^(ACCEPT|DROP)$ ]]; then
             _log "WARNING" "Action=/$_action/ is invalid"
             return 1
         fi
@@ -199,7 +199,7 @@ get_rule_chain() {
     # $2: object id
     # $3: chain id
 
-    if [[ ! "$1" =~ ^container|network$ ]]; then
+    if [[ ! "$1" =~ ^(container|network)$ ]]; then
         _log "WARNING" "Call get_rule_chain invalid type=$1 invalid, ignoring rule"
         return 1
     fi
@@ -211,7 +211,7 @@ get_rule_chain() {
         return 1
     fi
 
-    if [[ ! "$_chain" =~ ^INPUT|OUTPUT|FORWARD$ ]]; then
+    if [[ ! "$_chain" =~ ^(INPUT|OUTPUT|FORWARD)$ ]]; then
         _log "WARNING" "$1 $2 rule $3 chain=$_chain is invalid, ignoring rule"
         return 1
     fi
@@ -225,7 +225,7 @@ get_rule_protocol() {
     # $2: object id
     # $3: chain id
 
-    if [[ ! "$1" =~ ^container|network$ ]]; then
+    if [[ ! "$1" =~ ^(container|network)$ ]]; then
         _log "WARNING" "Call get_rule_protocol invalid type=$1 invalid, ignoring rule"
         return 1
     fi
@@ -251,8 +251,8 @@ get_rule_action() {
     # $2: object id
     # $3: chain id
 
-    if [[ ! "$1" =~ ^container|network$ ]]; then
-        _log "WARNING" "Call get_rule_action invalid type=$1 invalid, ignoring rule"
+    if [[ ! "$1" =~ ^(container|network)$ ]]; then
+        _log "WARNING" "Call get_rule_action invalid type=$1, ignoring rule"
         return 1
     fi
 
@@ -263,12 +263,43 @@ get_rule_action() {
         return 1
     fi
 
-    if [[ ! "$_action" =~ ^ACCEPT|DROP|REJECT$ ]]; then
+    if [[ ! "$_action" =~ ^(ACCEPT|DROP|REJECT)$ ]]; then
         _log "WARNING" "$1 $2 rule $3 action=$_action is invalid, ignoring rule"
         return 1
     fi
 
     echo "$_action"
+}
+
+
+get_rule_port() {
+    # $1: container|network
+    # $2: object id
+    # $3: chain id
+    # $4: sport|dport
+
+    if [[ ! "$1" =~ ^(container|network)$ ]]; then
+        _log "WARNING" "Call get_rule_port invalid type=$1, ignoring rule"
+        return 1
+    fi
+
+    if [[ ! "$4" =~ ^(sport|dport)$ ]]; then
+        _log "WARNING" "Call get_rule_port invalid port=$4, ignoring rule"
+        return 1
+    fi
+
+    local _port
+
+    set +o pipefail
+    _port=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.${4}" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4)
+    set -o pipefail
+
+    if [[ -n "$_port" ]] && [[ ! "$_port" =~ ^[0-9]+$ ]]; then
+        _log "WARNING" "$1 $2 rule $3 _port=$_port is invalid, ignoring rule"
+        return 1
+    fi
+
+    echo "$_port"
 }
 
 
@@ -291,11 +322,43 @@ get_rule() {
 process_container_rule() {
     _log "DEBUG" "process_container_rule_id $1 id=$2"
 
-    _chain=$(get_rule_chain         "container" "$1" "$2") || { _log "WARNING" "get_rule_chain failed"; return 1; }
-    _protocol=$(get_rule_protocol   "container" "$1" "$2") || { _log "WARNING" "get_rule_protocol failed"; return 1; }
-    _action=$(get_rule_action       "container" "$1" "$2") || { _log "WARNING" "get_rule_action failed"; return 1; }
+    local _cmd
 
-    _log "$_chain $_protocol $_action"
+    _chain=$(get_rule_chain         "container" "$1" "$2") || { _log "WARNING" "get_rule_chain failed"; return 1; }
+    _cmd="iptables -A $_chain"
+
+    _protocol=$(get_rule_protocol   "container" "$1" "$2") || { _log "WARNING" "get_rule_protocol failed"; return 1; }
+    if [[ -n "$_protocol" ]]; then
+        _cmd="$_cmd -p $_protocol"
+    fi
+
+    if [[ "$_chain" = "INPUT" ]]; then
+        _dst="0.0.0.0/0"
+    fi
+
+    if [[ "$_chain" = "OUTPUT" ]]; then
+        _src="0.0.0.0/0"
+    fi
+
+    if [[ -n "$_protocol" ]]; then
+        local _sport
+        local _dport
+
+        _sport=$(get_rule_port         "container" "$1" "$2" "sport")
+        if [[ -n "$_sport" ]]; then
+            _cmd="$_cmd --sport $_sport"
+        fi
+
+        _dport=$(get_rule_port         "container" "$1" "$2" "dport")
+        if [[ -n "$_dport" ]]; then
+            _cmd="$_cmd --dport $_dport"
+        fi
+    fi
+
+    _action=$(get_rule_action       "container" "$1" "$2") || { _log "WARNING" "get_rule_action failed"; return 1; }
+    _cmd="$_cmd -j $_action"
+
+    _log "DEBUG" "_cmd=$_cmd"
 }
 
 
