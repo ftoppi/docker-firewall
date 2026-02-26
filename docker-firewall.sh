@@ -118,7 +118,7 @@ process_container_policy() {
 
         _log "DEBUG" "Policy Chain=$_chain Action=$_action is valid"
 
-        cmd="nsenter -n -t "$_pid" iptables -P $_chain $_action"
+        cmd="nsenter -n -t $_pid iptables -P $_chain $_action"
 
         if [[ "$DRY_RUN" -eq 1 ]]; then
             _log "DRY RUN MODE - Container=$object_id would run: $cmd"
