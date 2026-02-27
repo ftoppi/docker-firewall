@@ -529,7 +529,7 @@ process_container_rule() {
         return 1
     fi
 
-    _log INFO "Applied successfully: ${_cmd[*]}"
+    _log INFO "Applied rule successfully: ${_cmd[*]}"
 }
 
 
