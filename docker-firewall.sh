@@ -35,12 +35,17 @@ set -euo pipefail
 #   - firewall.rules.010.INPUT.dport=80
 
 
-readonly DEBUG="${DEBUG:-0}" # set to 1 to print debug logs
-readonly DRY_RUN="${DRY_RUN:-0}"
-
+DEBUG="${DEBUG:-0}" # set to 1 to print debug logs
+DRY_RUN="${DRY_RUN:-0}"
+CLEANUP="${CLEANUP:-1}"
+CLEANUP_EXIT="${CLEANUP_EXIT:-1}"
 NOW="$(date +%Y%m%d_%H%M%S)"
-readonly NOW
 
+readonly DEBUG
+readonly DRY_RUN
+readonly CLEANUP
+readonly CLEANUP_EXIT
+readonly NOW
 readonly BASE_DIR="/dev/shm/dfw.${NOW}"
 
 # initialize base directory
@@ -75,16 +80,16 @@ _log() {
 
 cleanup() {
     if [[ "$CLEANUP_EXIT" -eq "1" ]]; then
-    _log "INFO" "Cleanup on exit"
-    rm -vrf -- "$BASE_DIR"
+        _log "INFO" "Cleanup on exit"
+        rm -vrf -- "$BASE_DIR"
     fi
     exit 0
 }
 
 cleanup_container() {
     if [[ "$CLEANUP" -eq "1" ]]; then
-    _log "INFO" "Cleanup container $1 files"
-    find "$BASE_DIR" -type f -name "*_$1" -ls -delete
+        _log "INFO" "Cleanup container $1 files"
+        find "$BASE_DIR" -type f -name "*_$1" -ls -delete
     fi
 }
 
@@ -613,18 +618,18 @@ if ! command -v nsenter &> /dev/null; then
 fi
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" && "${1:-}" == "run" ]]; then
-_log "docker-firewall started, listening for events"
+    _log "docker-firewall started, listening for events"
 
-_log "DEBUG" "debug log enabled"
+    _log "DEBUG" "debug log enabled"
 
-if [[ "$DRY_RUN" -eq 1 ]]; then
-    _log "INFO" "DRY RUN enabled"
-fi
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        _log "INFO" "DRY RUN enabled"
+    fi
 
 
-# Listen to Docker events
-docker events --filter type=container --filter type=network --filter event=start --filter event=create --filter event=destroy --filter label=firewall.enable=true | while read -r event; do
-    process_event "$event"
-    _log "DEBUG" "=========="
-done
+    # Listen to Docker events
+    docker events --filter type=container --filter type=network --filter event=start --filter event=create --filter event=destroy --filter label=firewall.enable=true | while read -r event; do
+        process_event "$event"
+        _log "DEBUG" "=========="
+    done
 fi
