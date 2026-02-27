@@ -243,6 +243,7 @@ get_rule_chain() {
 
     local _chain
 
+    # shellcheck disable=SC2018,SC2019
     if ! _chain=$(grep -E "firewall.rules.${3}." "$BASE_DIR/${1}_rules_$2" 2>/dev/null | head -n1 | cut -d '.' -f 4 | tr 'a-z' 'A-Z'); then
         _log "WARNING" "$1 $2 rule $3 is invalid, ignoring rule"
         return 1
@@ -271,6 +272,7 @@ get_rule_protocol() {
 
     # protocol may be omitted
     set +o pipefail
+    # shellcheck disable=SC2018,SC2019
     _protocol=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.protocol" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'A-Z' 'a-z')
     set -o pipefail
 
@@ -295,6 +297,7 @@ get_rule_action() {
 
     local _action
 
+    # shellcheck disable=SC2018,SC2019
     if ! _action=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.action" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'a-z' 'A-Z'); then
         _log "WARNING" "$1 $2 rule $3 is invalid, ignoring rule"
         return 1
@@ -383,6 +386,7 @@ get_rule_state() {
     local _state
 
     set +o pipefail
+    # shellcheck disable=SC2018,SC2019
     _state=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.state" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'a-z' 'A-Z')
     set -o pipefail
 
