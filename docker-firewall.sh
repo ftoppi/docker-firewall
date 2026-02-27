@@ -305,7 +305,7 @@ get_rule_action() {
         return 1
     fi
 
-    if [[ ! "$_action" =~ ^(ACCEPT|DROP|REJECT)$ ]]; then
+    if [[ ! "$_action" =~ ^(ACCEPT|DROP|REJECT|LOG)$ ]]; then
         _log "WARNING" "$1 $2 rule $3 action=$_action is invalid, ignoring rule"
         return 1
     fi
@@ -398,6 +398,31 @@ get_rule_state() {
     fi
 
     echo "$_state"
+}
+
+
+get_rule_log_prefix() {
+    # $1: container|network
+    # $2: object id
+    # $3: chain id
+
+    if [[ ! "$1" =~ ^(container|network)$ ]]; then
+        _log "WARNING" "Call get_rule_log_prefix invalid type=$1, ignoring rule"
+        return 1
+    fi
+
+    local _log_prefix
+
+    if ! _log_prefix=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.log-prefix" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null); then
+        # no log prefix, it's fine
+        true
+    fi
+
+    if [[ -n "$_log_prefix" ]]; then
+        _log_prefix=$(echo "$_log_prefix" | head -n1 | cut -d '"' -f 4 | tr -dC 'a-zA-Z0-9_');
+    fi
+
+    echo "$_log_prefix"
 }
 
 
