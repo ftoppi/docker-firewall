@@ -500,7 +500,7 @@ process_container_rules() {
 
     local rule_id
 
-    while read rule_id; do
+    while read -r rule_id; do
         process_container_rule "$1" "$rule_id" || _log "ERROR" "Something went wrong"
     done < "$BASE_DIR/container_rule_ids_$1"
 }
