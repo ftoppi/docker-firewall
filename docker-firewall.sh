@@ -577,6 +577,7 @@ if ! command -v nsenter &> /dev/null; then
     exit 1
 fi
 
+if [[ "${BASH_SOURCE[0]}" == "${0}" && "${1:-}" == "run" ]]; then
 _log "docker-firewall started, listening for events"
 
 _log "DEBUG" "debug log enabled"
@@ -591,3 +592,4 @@ docker events --filter type=container --filter type=network --filter event=start
     process_event "$event"
     _log "DEBUG" "=========="
 done
+fi
