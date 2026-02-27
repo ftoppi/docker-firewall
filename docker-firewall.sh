@@ -151,14 +151,14 @@ process_container_policy() {
 
         _log "DEBUG" "Policy Chain=$_chain Action=$_action is valid"
 
-        cmd="nsenter -n -t $_pid iptables -P $_chain $_action"
+        cmd=(nsenter -n -t "$_pid" iptables -P "$_chain" "$_action")
 
         if [[ "$DRY_RUN" -eq 1 ]]; then
-            _log "DRY RUN MODE - Container=$object_id would run: $cmd"
+            _log "DRY RUN MODE - Container=$object_id would run: ${cmd[*]}"
             return 0
         fi
 
-        if ! $cmd; then
+        if ! "${cmd[@]}"; then
             _log "WARNING" "Container=$object_id PID=$(cat "$BASE_DIR/container_pid_$1") Policy Chain=$_chain Action=$_action failed"
             return 1
         fi
@@ -430,12 +430,12 @@ process_container_rule() {
     local _action
 
     _chain=$(get_rule_chain         "container" "$1" "$2") || { _log "WARNING" "get_rule_chain failed"; return 1; }
-    _cmd="nsenter -n -t $_pid iptables -A $_chain -m comment --comment $2"
+    _cmd=(nsenter -n -t "$_pid" iptables -A "$_chain" -m comment --comment "$2")
 
     if [[ "$_chain" = "INPUT" ]]; then
         _src=$(get_rule_srcdst         "container" "$1" "$2" "src") || { _log "WARNING" "get_rule_srcdst src failed"; return 1; }
         if [[ -n "$_src" ]]; then
-            _cmd="$_cmd -s $_src"
+            _cmd+=(-s "$_src")
         fi
 
         _dst="0.0.0.0/0"
@@ -446,13 +446,13 @@ process_container_rule() {
 
         _dst=$(get_rule_srcdst         "container" "$1" "$2" "dst") || { _log "WARNING" "get_rule_srcdst dst failed"; return 1; }
         if [[ -n "$_dst" ]]; then
-            _cmd="$_cmd -d $_dst"
+            _cmd+=(-d "$_dst")
         fi
     fi
 
     _protocol=$(get_rule_protocol   "container" "$1" "$2") || { _log "WARNING" "get_rule_protocol failed"; return 1; }
     if [[ -n "$_protocol" ]]; then
-        _cmd="$_cmd -p $_protocol"
+        _cmd+=(-p "$_protocol")
     fi
 
     if [[ -n "$_protocol" ]]; then
@@ -461,35 +461,43 @@ process_container_rule() {
 
         _sport=$(get_rule_port         "container" "$1" "$2" "sport") || { _log "WARNING" "get_rule_port sport failed"; return 1; }
         if [[ -n "$_sport" ]]; then
-            _cmd="$_cmd --sport $_sport"
+            _cmd+=(--sport "$_sport")
         fi
 
         _dport=$(get_rule_port         "container" "$1" "$2" "dport") || { _log "WARNING" "get_rule_port dport failed"; return 1; }
         if [[ -n "$_dport" ]]; then
-            _cmd="$_cmd --dport $_dport"
+            _cmd+=(--dport "$_dport")
         fi
     fi
 
     _state=$(get_rule_state "container" "$1" "$2") || { _log "WARNING" "get_rule_state failed"; return 1; }
 
     if [[ -n "$_state" ]] ; then
-        _cmd="$_cmd -m state --state $_state"
+        _cmd+=(-m state --state "$_state")
     fi
 
     _action=$(get_rule_action       "container" "$1" "$2") || { _log "WARNING" "get_rule_action failed"; return 1; }
-    _cmd="$_cmd -j $_action"
+    _cmd+=(-j "$_action")
+
+    if [[ "$_action" = "LOG" ]]; then
+        local _log_prefix
+        _log_prefix=$(get_rule_log_prefix "container" "$1" "$2") || { _log "WARNING" "get_rule_log_prefix failed"; return 1; }
+        if [[ -n "$_log_prefix" ]]; then
+            _cmd+=(--log_prefix "$_log_prefix")
+        fi
+    fi
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
-        _log "DRY RUN MODE - Container=$1 pid=$_pid would run: $_cmd"
+        _log "DRY RUN MODE - Container=$1 pid=$_pid would run: ${_cmd[*]}"
         return 0
     fi
 
-    if ! $_cmd; then
+    if ! "${_cmd[@]}"; then
         _log "WARNING" "Container=$1 PID=$(cat "$BASE_DIR/container_pid_$1") Policy Chain=$_chain Action=$_action failed"
         return 1
     fi
 
-    _log INFO "Applied successfully: $_cmd"
+    _log INFO "Applied successfully: ${_cmd[*]}"
 }
 
 
