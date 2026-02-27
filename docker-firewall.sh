@@ -515,7 +515,7 @@ process_container_rule() {
         local _log_prefix
         _log_prefix=$(get_rule_log_prefix "container" "$1" "$2") || { _log "WARNING" "get_rule_log_prefix failed"; return 1; }
         if [[ -n "$_log_prefix" ]]; then
-            _cmd+=(--log_prefix "$_log_prefix")
+            _cmd+=(--log-prefix "$_log_prefix ")
         fi
     fi
 
@@ -584,6 +584,9 @@ process_event() {
     event_type=$(echo "$1" | awk '{print $2}')
     event_action=$(echo "$1" | awk '{print $3}')
     object_id=$(echo "$1" | awk '{print substr($4, 1, 12)}')
+
+    # just in case someone removed the directory
+    mkdir -p "$BASE_DIR"
 
     case "$event_type" in
         "container")
