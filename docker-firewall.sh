@@ -74,14 +74,18 @@ _log() {
 
 
 cleanup() {
+    if [[ "$CLEANUP_EXIT" -eq "1" ]]; then
     _log "INFO" "Cleanup on exit"
     rm -vrf -- "$BASE_DIR"
+    fi
     exit 0
 }
 
 cleanup_container() {
+    if [[ "$CLEANUP" -eq "1" ]]; then
     _log "INFO" "Cleanup container $1 files"
     find "$BASE_DIR" -type f -name "*_$1" -ls -delete
+    fi
 }
 
 trap cleanup INT
