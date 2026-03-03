@@ -550,6 +550,7 @@ process_event_container() {
     _log "DEBUG" "New event $event_type action=$event_action object_id=$object_id"
 
     if [[ "$event_action" != "start" ]]; then
+        _log "DEBUG" "Container $object_id unsupported action=${event_action}, return"
         return
     fi
 
@@ -577,13 +578,7 @@ process_event_network() {
 
 
 process_event() {
-    local event_type
-    local event_action
-    local object_id
-
-    event_type=$(echo "$1" | awk '{print $2}')
-    event_action=$(echo "$1" | awk '{print $3}')
-    object_id=$(echo "$1" | awk '{print substr($4, 1, 12)}')
+    object_id="${object_id:0:12}"
 
     # just in case someone removed the directory
     mkdir -p "$BASE_DIR"
@@ -631,8 +626,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" && "${1:-}" == "run" ]]; then
 
 
     # Listen to Docker events
-    docker events --filter type=container --filter type=network --filter event=start --filter event=create --filter event=destroy --filter label=firewall.enable=true | while read -r event; do
-        process_event "$event"
+    docker events --filter type=container --filter type=network --filter event=start --filter event=create --filter event=destroy --filter label=firewall.enable=true | while read -r datetime event_type event_action object_id _rest; do
+        process_event
         _log "DEBUG" "=========="
     done
 fi
