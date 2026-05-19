@@ -34,23 +34,21 @@ set -euo pipefail
 #   - firewall.rules.010.INPUT.protocol=tcp
 #   - firewall.rules.010.INPUT.dport=80
 
+umask 077
 
 DEBUG="${DEBUG:-0}" # set to 1 to print debug logs
 DRY_RUN="${DRY_RUN:-0}"
 CLEANUP="${CLEANUP:-1}"
 CLEANUP_EXIT="${CLEANUP_EXIT:-1}"
 NOW="$(date +%Y%m%d_%H%M%S)"
+BASE_DIR=$(mktemp -d -p /dev/shm dfw.XXXXXX)
 
 readonly DEBUG
 readonly DRY_RUN
 readonly CLEANUP
 readonly CLEANUP_EXIT
 readonly NOW
-readonly BASE_DIR="/dev/shm/dfw.${NOW}"
-
-# initialize base directory
-rm -rf -- "$BASE_DIR"
-mkdir -p "$BASE_DIR"
+readonly BASE_DIR
 
 
 _log() {
