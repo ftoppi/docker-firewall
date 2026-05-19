@@ -144,15 +144,23 @@ process_container_policy() {
         # shellcheck disable=SC2018,SC2019
         _action="$(echo "$_action" | cut -d '"' -f 2 | tr 'a-z' 'A-Z')"
 
-        if [[ ! "$_chain" =~ ^(INPUT|OUTPUT|FORWARD)$ ]]; then
-            _log "WARNING" "Policy Chain=/$_chain/ is invalid"
-            return 1
-        fi
+        case "$_chain" in
+            INPUT|OUTPUT|FORWARD)
+                ;;
+            *)
+                _log "WARNING" "Policy Chain=/$_chain/ is invalid"
+                return 1
+                ;;
+        esac
 
-        if [[ ! "$_action" =~ ^(ACCEPT|DROP)$ ]]; then
-            _log "WARNING" "Action=/$_action/ is invalid"
-            return 1
-        fi
+        case "$_action" in
+            ACCEPT|DROP)
+                ;;
+            *)
+                _log "WARNING" "Action=/$_action/ is invalid"
+                return 1
+                ;;
+        esac
 
         _log "DEBUG" "Policy Chain=$_chain Action=$_action is valid"
 
