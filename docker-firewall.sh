@@ -176,7 +176,7 @@ process_container_policy() {
             return 1
         fi
 
-        _log INFO "Applied policy successfully chain=$_chain action=$_action"
+        _log "INFO" "Applied policy successfully chain=$_chain action=$_action"
     done
 
     return 0
@@ -535,7 +535,7 @@ process_container_rule() {
         return 1
     fi
 
-    _log INFO "Applied rule successfully: ${_cmd[*]}"
+    _log "INFO" "Applied rule successfully: ${_cmd[*]}"
 }
 
 
