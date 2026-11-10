@@ -80,6 +80,10 @@ expect "misspelled key skips the rule instead of widening it" \
     "" \
     "$(run '{"firewall.enable":"true","firewall.rules.4.OUTPUT.dst":"5.5.5.5","firewall.rules.4.OUTPUT.dprot":"tcp","firewall.rules.4.OUTPUT.dport":"22","firewall.rules.4.OUTPUT.action":"ACCEPT"}' 1a)"
 
+expect "lower-case chain skips that rule, other rules still apply" \
+    "nsenter -n -t 4242 iptables -A OUTPUT -m comment --comment 2 -d 9.9.9.9 -j DROP" \
+    "$(run '{"firewall.enable":"true","firewall.rules.1.output.dst":"8.8.8.8","firewall.rules.1.OUTPUT.action":"ACCEPT","firewall.rules.2.OUTPUT.dst":"9.9.9.9","firewall.rules.2.OUTPUT.action":"DROP"}' 1a)"
+
 expect "invalid policy action falls back to DROP" \
     "nsenter -n -t 4242 iptables -P INPUT DROP" \
     "$(run '{"firewall.enable":"true","firewall.policies.INPUT":"DROPP"}' 1a)"
