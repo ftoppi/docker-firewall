@@ -289,7 +289,7 @@ get_rule_protocol() {
     _protocol=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.protocol" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'A-Z' 'a-z')
     set -o pipefail
 
-    if [[ -n "$_protocol" ]] && [[ ! "$_protocol" =~ ^tcp|udp$ ]]; then
+    if [[ -n "$_protocol" ]] && [[ ! "$_protocol" =~ ^(all|icmp|tcp|udp)$ ]]; then
         _log "WARNING" "$1 $2 rule $3 protocol=$_protocol is invalid, ignoring rule"
         return 1
     fi
