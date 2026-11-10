@@ -14,15 +14,6 @@ The script supports the following actions:
 
 ⚠️ The first action of a rule is applied to the whole rule.
 
-For the REJECT action, you can specify the type of ICMP packet to send. It supports the standard IPv4 types:
-- icmp-net-unreachable
-- icmp-host-unreachable
-- icmp-port-unreachable
-- icmp-proto-unreachable
-- icmp-net-prohibited
-- icmp-host-prohibited
-- icmp-admin-prohibited (default)
-
 The script supports the following chains:
 - INPUT
 - OUTPUT
@@ -76,7 +67,6 @@ Here are example labels:
       - firewall.rules.abc.INPUT.src=9.0.0.0/24
       - firewall.rules.abc.INPUT.sport=53
       - firewall.rules.abc.INPUT.action=REJECT
-      - firewall.rules.abc.INPUT.reject_with=icmp-port-unreachable
 ```
 
 Rule IDs must be alphanumerical. Rules with non-alphanumerical IDs are silently ignored.
