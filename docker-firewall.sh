@@ -157,8 +157,9 @@ process_container_policy() {
             ACCEPT|DROP)
                 ;;
             *)
-                _log "WARNING" "Action=/$_action/ is invalid"
-                return 1
+                # fail closed: a typo in the action must not leave the chain open
+                _log "ERROR" "Policy Chain=$_chain Action=/$_action/ is invalid, using DROP"
+                _action=DROP
                 ;;
         esac
 
@@ -458,6 +459,14 @@ process_container_rule() {
     # $2: rule id
 
     _log "DEBUG" "process_container_rule_id $1 id=$2"
+
+    # a misspelled key would silently drop a filter and widen the rule
+    local _unknown
+    _unknown=$(grep -oP "firewall\.rules\.${2}\.[A-Z]+\.\K[^\"]+" "$BASE_DIR/container_rules_$1" | grep -vxE 'src|dst|protocol|sport|dport|state|action|log-prefix|reject_with' | tr '\n' ' ') || true
+    if [[ -n "$_unknown" ]]; then
+        _log "WARNING" "Container=$1 rule $2 has unknown key(s): $_unknown, ignoring rule"
+        return 1
+    fi
 
     local _chain
     local _cmd
