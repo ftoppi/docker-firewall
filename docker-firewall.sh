@@ -633,7 +633,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" && "${1:-}" == "run" ]]; then
 
     # Listen to Docker events
     docker events --filter type=container --filter type=network --filter event=start --filter event=create --filter event=destroy --filter label=firewall.enable=true | while read -r datetime event_type event_action object_id _rest; do
-        process_event
+        process_event || _log "ERROR" "Event failed"
         _log "DEBUG" "=========="
     done
 fi
