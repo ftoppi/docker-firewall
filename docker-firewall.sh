@@ -91,7 +91,7 @@ cleanup_container() {
     fi
 }
 
-trap cleanup INT
+trap cleanup INT TERM
 
 
 get_container_pid() {
