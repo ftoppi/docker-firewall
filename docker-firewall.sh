@@ -233,196 +233,30 @@ validate_rule_chain_count() {
 }
 
 
-get_rule_chain() {
-    # $1: container|network
-    # $2: object id
-    # $3: chain id
-
-    if [[ ! "$1" =~ ^(container|network)$ ]]; then
-        _log "WARNING" "Call get_rule_chain invalid type=$1 invalid, ignoring rule"
-        return 1
-    fi
-
-    local _chain
-
-    # shellcheck disable=SC2018,SC2019
-    if ! _chain=$(grep -E "firewall.rules.${3}." "$BASE_DIR/${1}_rules_$2" 2>/dev/null | head -n1 | cut -d '.' -f 4 | tr 'a-z' 'A-Z'); then
-        _log "WARNING" "$1 $2 rule $3 is invalid, ignoring rule"
-        return 1
-    fi
-
-    if [[ ! "$_chain" =~ ^(INPUT|OUTPUT|FORWARD)$ ]]; then
-        _log "WARNING" "$1 $2 rule $3 chain=$_chain is invalid, ignoring rule"
-        return 1
-    fi
-
-    echo "$_chain"
-}
+RE_IP='((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(/(3[0-2]|[12]?[0-9]))?'
 
 
-get_rule_protocol() {
-    # $1: container|network
-    # $2: object id
-    # $3: chain id
+get_rule_key() {
+    # $1: object id
+    # $2: rule id
+    # $3: key, such as dst or sport
+    # $4: allowed values, as an upper-case regex
+    # Prints the value, or nothing if the key is not set. Fails with a warning
+    # when the value is set and does not match $4.
 
-    if [[ ! "$1" =~ ^(container|network)$ ]]; then
-        _log "WARNING" "Call get_rule_protocol invalid type=$1 invalid, ignoring rule"
-        return 1
-    fi
-
-    local _protocol
-
-    # protocol may be omitted
-    set +o pipefail
-    # shellcheck disable=SC2018,SC2019
-    _protocol=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.protocol" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'A-Z' 'a-z')
-    set -o pipefail
-
-    if [[ -n "$_protocol" ]] && [[ ! "$_protocol" =~ ^(all|icmp|tcp|udp)$ ]]; then
-        _log "WARNING" "$1 $2 rule $3 protocol=$_protocol is invalid, ignoring rule"
-        return 1
-    fi
-
-    echo "$_protocol"
-}
-
-
-get_rule_action() {
-    # $1: container|network
-    # $2: object id
-    # $3: chain id
-
-    if [[ ! "$1" =~ ^(container|network)$ ]]; then
-        _log "WARNING" "Call get_rule_action invalid type=$1, ignoring rule"
-        return 1
-    fi
-
-    local _action
-
-    # shellcheck disable=SC2018,SC2019
-    if ! _action=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.action" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'a-z' 'A-Z'); then
-        _log "WARNING" "$1 $2 rule $3 is invalid, ignoring rule"
-        return 1
-    fi
-
-    if [[ ! "$_action" =~ ^(ACCEPT|DROP|REJECT|LOG)$ ]]; then
-        _log "WARNING" "$1 $2 rule $3 action=$_action is invalid, ignoring rule"
-        return 1
-    fi
-
-    echo "$_action"
-}
-
-
-get_rule_port() {
-    # $1: container|network
-    # $2: object id
-    # $3: chain id
-    # $4: sport|dport
-
-    if [[ ! "$1" =~ ^(container|network)$ ]]; then
-        _log "WARNING" "Call get_rule_port invalid type=$1, ignoring rule"
-        return 1
-    fi
-
-    if [[ ! "$4" =~ ^(sport|dport)$ ]]; then
-        _log "WARNING" "Call get_rule_port invalid port=$4, ignoring rule"
-        return 1
-    fi
-
-    local _port
+    local _value
 
     set +o pipefail
-    _port=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.${4}" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4)
+    _value=$(grep -P "firewall\.rules\.${2}\.[A-Z]+\.${3}\": " "$BASE_DIR/container_rules_$1" | head -n1 | cut -d '"' -f 4)
     set -o pipefail
 
-    if [[ -n "$_port" ]] && [[ ! "$_port" =~ ^[0-9]+$ ]]; then
-        _log "WARNING" "$1 $2 rule $3 _port=$_port is invalid, ignoring rule"
+    if [[ -n "$_value" ]] && [[ ! "${_value^^}" =~ ^($4)$ ]]; then
+        # stderr: this function runs inside $(...), so stdout would become the value
+        _log "WARNING" "Container=$1 rule $2 $3=$_value is invalid, ignoring rule" >&2
         return 1
     fi
 
-    echo "$_port"
-}
-
-
-get_rule_srcdst() {
-    # $1: container|network
-    # $2: object id
-    # $3: chain id
-    # $4: src|dst
-
-    if [[ ! "$1" =~ ^(container|network)$ ]]; then
-        _log "WARNING" "Call get_rule_srcdst invalid type=$1, ignoring rule"
-        return 1
-    fi
-
-    if [[ ! "$4" =~ ^(src|dst)$ ]]; then
-        _log "WARNING" "Call get_rule_srcdst invalid srcdst=$4, ignoring rule"
-        return 1
-    fi
-
-    local _srcdst
-
-    set +o pipefail
-    _srcdst=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.${4}" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4)
-    set -o pipefail
-
-    if [[ -n "$_srcdst" ]] && [[ ! "$_srcdst" =~ ^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\/(3[0-2]|[12]?[0-9]))?$ ]]; then
-        _log "WARNING" "$1 $2 rule $3 _srcdst=$_srcdst is invalid, ignoring rule"
-        return 1
-    fi
-
-    echo "$_srcdst"
-}
-
-get_rule_state() {
-    # $1: container|network
-    # $2: object id
-    # $3: chain id
-
-    if [[ ! "$1" =~ ^(container|network)$ ]]; then
-        _log "WARNING" "Call get_rule_state invalid type=$1, ignoring rule"
-        return 1
-    fi
-
-    local _state
-
-    set +o pipefail
-    # shellcheck disable=SC2018,SC2019
-    _state=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.state" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null | head -n1 | cut -d '"' -f 4 | tr 'a-z' 'A-Z')
-    set -o pipefail
-
-    if [[ ! "$_state" =~ ^(RELATED,ESTABLISHED|ESTABLISHED,RELATED|ESTABLISHED|RELATED|)$ ]]; then
-        _log "WARNING" "$1 $2 rule $3 state=$_state is invalid, ignoring rule"
-        return 1
-    fi
-
-    echo "$_state"
-}
-
-
-get_rule_log_prefix() {
-    # $1: container|network
-    # $2: object id
-    # $3: chain id
-
-    if [[ ! "$1" =~ ^(container|network)$ ]]; then
-        _log "WARNING" "Call get_rule_log_prefix invalid type=$1, ignoring rule"
-        return 1
-    fi
-
-    local _log_prefix
-
-    if ! _log_prefix=$(grep -P "firewall\.rules\.${3}\.[A-Z]+\.log-prefix" "$BASE_DIR/${1}_rules_${2}" 2>/dev/null); then
-        # no log prefix, it's fine
-        true
-    fi
-
-    if [[ -n "$_log_prefix" ]]; then
-        _log_prefix=$(echo "$_log_prefix" | head -n1 | cut -d '"' -f 4 | tr -dC 'a-zA-Z0-9_');
-    fi
-
-    echo "$_log_prefix"
+    echo "$_value"
 }
 
 
@@ -445,62 +279,67 @@ process_container_rule() {
     local _src
     local _dst
     local _protocol
+    local _sport
+    local _dport
     local _state
     local _action
+    local _log_prefix
 
-    _chain=$(get_rule_chain         "container" "$1" "$2") || { _log "WARNING" "get_rule_chain failed"; return 1; }
+    _chain=$(grep -oP "firewall\.rules\.${2}\.\K[^.]+(?=\.)" "$BASE_DIR/container_rules_$1" | head -n1 || true)
+    _chain=${_chain^^}
+    if [[ ! "$_chain" =~ ^(INPUT|OUTPUT|FORWARD)$ ]]; then
+        _log "WARNING" "Container=$1 rule $2 chain=$_chain is invalid, ignoring rule"
+        return 1
+    fi
+
     _cmd=(nsenter -n -t "$_pid" iptables -A "$_chain" -m comment --comment "$2")
 
     if [[ "$_chain" = "INPUT" ]]; then
-        _src=$(get_rule_srcdst         "container" "$1" "$2" "src") || { _log "WARNING" "get_rule_srcdst src failed"; return 1; }
+        _src=$(get_rule_key "$1" "$2" src "$RE_IP") || return 1
         if [[ -n "$_src" ]]; then
             _cmd+=(-s "$_src")
         fi
-
-        _dst="0.0.0.0/0"
     fi
 
     if [[ "$_chain" = "OUTPUT" ]]; then
-        _src="0.0.0.0/0"
-
-        _dst=$(get_rule_srcdst         "container" "$1" "$2" "dst") || { _log "WARNING" "get_rule_srcdst dst failed"; return 1; }
+        _dst=$(get_rule_key "$1" "$2" dst "$RE_IP") || return 1
         if [[ -n "$_dst" ]]; then
             _cmd+=(-d "$_dst")
         fi
     fi
 
-    _protocol=$(get_rule_protocol   "container" "$1" "$2") || { _log "WARNING" "get_rule_protocol failed"; return 1; }
+    _protocol=$(get_rule_key "$1" "$2" protocol 'ALL|ICMP|TCP|UDP') || return 1
+    _protocol=${_protocol,,}
     if [[ -n "$_protocol" ]]; then
         _cmd+=(-p "$_protocol")
-    fi
 
-    if [[ -n "$_protocol" ]]; then
-        local _sport
-        local _dport
-
-        _sport=$(get_rule_port         "container" "$1" "$2" "sport") || { _log "WARNING" "get_rule_port sport failed"; return 1; }
+        _sport=$(get_rule_key "$1" "$2" sport '[0-9]+') || return 1
         if [[ -n "$_sport" ]]; then
             _cmd+=(--sport "$_sport")
         fi
 
-        _dport=$(get_rule_port         "container" "$1" "$2" "dport") || { _log "WARNING" "get_rule_port dport failed"; return 1; }
+        _dport=$(get_rule_key "$1" "$2" dport '[0-9]+') || return 1
         if [[ -n "$_dport" ]]; then
             _cmd+=(--dport "$_dport")
         fi
     fi
 
-    _state=$(get_rule_state "container" "$1" "$2") || { _log "WARNING" "get_rule_state failed"; return 1; }
-
-    if [[ -n "$_state" ]] ; then
-        _cmd+=(-m state --state "$_state")
+    _state=$(get_rule_key "$1" "$2" state 'RELATED,ESTABLISHED|ESTABLISHED,RELATED|ESTABLISHED|RELATED') || return 1
+    if [[ -n "$_state" ]]; then
+        _cmd+=(-m state --state "${_state^^}")
     fi
 
-    _action=$(get_rule_action       "container" "$1" "$2") || { _log "WARNING" "get_rule_action failed"; return 1; }
+    _action=$(get_rule_key "$1" "$2" action 'ACCEPT|DROP|REJECT|LOG') || return 1
+    if [[ -z "$_action" ]]; then
+        _log "WARNING" "Container=$1 rule $2 has no action, ignoring rule"
+        return 1
+    fi
+    _action=${_action^^}
     _cmd+=(-j "$_action")
 
     if [[ "$_action" = "LOG" ]]; then
-        local _log_prefix
-        _log_prefix=$(get_rule_log_prefix "container" "$1" "$2") || { _log "WARNING" "get_rule_log_prefix failed"; return 1; }
+        _log_prefix=$(get_rule_key "$1" "$2" log-prefix '.*') || return 1
+        _log_prefix=$(echo "$_log_prefix" | tr -dC 'a-zA-Z0-9_')
         if [[ -n "$_log_prefix" ]]; then
             _cmd+=(--log-prefix "$_log_prefix ")
         fi
