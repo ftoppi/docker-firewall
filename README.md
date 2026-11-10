@@ -50,6 +50,10 @@ echo 1 > /proc/sys/net/netfilter/nf_log_all_netns
 1. Start and enable the service `systemctl start docker-firewall.service && systemctl enable docker-firewall.service`.
 1. Create a new container with labels (see below).
 
+## Tests
+
+Run `tests/test-rules.sh`. It needs no Docker and no root: it runs the script in dry-run mode with fake `docker`, `nsenter` and `iptables`, and checks the commands it would run. Pass another copy of the script as an argument to test that copy instead.
+
 ## Labels
 
 Here are example labels:

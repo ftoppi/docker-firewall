@@ -28,6 +28,16 @@ esac
 EOF
 chmod +x "$work/bin/docker"
 
+# Dry run never calls these. If it ever does, fail loudly.
+for tool in nsenter iptables; do
+    cat > "$work/bin/$tool" <<EOF
+#!/bin/bash
+echo "unexpected $tool call: \$*" >&2
+exit 1
+EOF
+    chmod +x "$work/bin/$tool"
+done
+
 # The script refuses to run as non-root; the test copy skips that check only.
 sed 's/if \[\[ "$(id -u)" -ne 0 \]\]; then/if false; then/' "$script" > "$work/fw.sh"
 
