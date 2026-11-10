@@ -40,14 +40,12 @@ DEBUG="${DEBUG:-0}" # set to 1 to print debug logs
 DRY_RUN="${DRY_RUN:-0}"
 CLEANUP="${CLEANUP:-1}"
 CLEANUP_EXIT="${CLEANUP_EXIT:-1}"
-NOW="$(date +%Y%m%d_%H%M%S)"
 BASE_DIR=$(mktemp -d -p /dev/shm dfw.XXXXXX)
 
 readonly DEBUG
 readonly DRY_RUN
 readonly CLEANUP
 readonly CLEANUP_EXIT
-readonly NOW
 readonly BASE_DIR
 
 
@@ -205,11 +203,6 @@ get_container_rules() {
         return 1
     fi
 
-    local _count
-    _count=$(( $(wc -l < "$BASE_DIR/container_rules_$1") - 2 ))
-
-    _log "DEBUG" "Found $_count rules for container $1"
-
     return 0
 }
 
@@ -221,11 +214,6 @@ get_container_rule_ids() {
         _log "INFO" "No firewall rule ids found for container $1"
         return 1
     fi
-
-    local _count
-    _count=$(( $(wc -l < "$BASE_DIR/container_rule_ids_$1") - 2 ))
-
-    _log "DEBUG" "Found $_count rule IDs for container $1"
 
     return 0
 }
@@ -438,22 +426,6 @@ get_rule_log_prefix() {
 }
 
 
-get_rule() {
-    local RULES="$1"
-    local RULE_ID="$2"
-
-    local RULE
-    RULE=$(echo "$RULES" | grep -P "firewall\.rules\.${RULE_ID}\.")
-
-    if [[ -z "$RULE" ]]; then
-        _log "WARNING" "Rule with ID=$RULE_ID is invalid, ignoring rule"
-        return 1
-    fi
-
-    echo "$RULE"
-}
-
-
 process_container_rule() {
     # $1: object id
     # $2: rule id
@@ -586,12 +558,6 @@ process_event_container() {
 }
 
 
-process_event_network() {
-    _log "DEBUG" "New event network   $event"
-    return
-}
-
-
 process_event() {
     object_id="${object_id:0:12}"
 
@@ -601,10 +567,6 @@ process_event() {
     case "$event_type" in
         "container")
             process_event_container
-            ;;
-
-        "network")
-            process_event_network
             ;;
 
         *)
@@ -641,7 +603,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" && "${1:-}" == "run" ]]; then
 
 
     # Listen to Docker events
-    docker events --filter type=container --filter type=network --filter event=start --filter event=create --filter event=destroy --filter label=firewall.enable=true | while read -r datetime event_type event_action object_id _rest; do
+    docker events --filter type=container --filter event=start --filter label=firewall.enable=true | while read -r datetime event_type event_action object_id _rest; do
         process_event || _log "ERROR" "Event failed"
         _log "DEBUG" "=========="
     done
