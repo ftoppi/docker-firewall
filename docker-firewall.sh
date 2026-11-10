@@ -173,7 +173,7 @@ process_container_policy() {
         fi
 
         if ! "${cmd[@]}"; then
-            _log "WARNING" "Container=$object_id PID=$(cat "$BASE_DIR/container_pid_$1") Policy Chain=$_chain Action=$_action failed"
+            _log "WARNING" "Container=$object_id PID=$_pid Policy Chain=$_chain Action=$_action failed"
             return 1
         fi
 
@@ -540,7 +540,7 @@ process_container_rule() {
     fi
 
     if ! "${_cmd[@]}"; then
-        _log "WARNING" "Container=$1 PID=$(cat "$BASE_DIR/container_pid_$1") Policy Chain=$_chain Action=$_action failed"
+        _log "WARNING" "Container=$1 PID=$_pid Policy Chain=$_chain Action=$_action failed"
         return 1
     fi
 
